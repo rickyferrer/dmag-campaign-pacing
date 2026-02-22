@@ -54,7 +54,7 @@ jobs:
           print("Schema ready.")
           PY
 
-      - name: Pull GAM report and write snapshot + send alerts
+      - name: Pull GAM report and write snapshot
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GAM_NETWORK_CODE: ${{ secrets.GAM_NETWORK_CODE }}
@@ -73,4 +73,4 @@ jobs:
             echo "Missing GitHub secret: GAM_REPORT_ID"
             exit 1
           fi
-          python src/main.py --source gam --gam-report-id "${GAM_REPORT_ID}"
+          python src/main.py --source gam --gam-report-id "${GAM_REPORT_ID}" --skip-email
