@@ -1,0 +1,76 @@
+name: GAM Pacing Refresh
+
+on:
+  schedule:
+    # 12:10 UTC = 6:10 AM CT (standard time)
+    - cron: "10 12 * * 1-5"
+    # 18:10 UTC = 12:10 PM CT (standard time)
+    - cron: "10 18 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Write GAM service account key
+        env:
+          GAM_SERVICE_ACCOUNT_JSON: ${{ secrets.GAM_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "${GAM_SERVICE_ACCOUNT_JSON}" ]; then
+            echo "Missing GitHub secret: GAM_SERVICE_ACCOUNT_JSON"
+            exit 1
+          fi
+          mkdir -p "${RUNNER_TEMP}/keys"
+          printf '%s' "${GAM_SERVICE_ACCOUNT_JSON}" > "${RUNNER_TEMP}/keys/gam-service-account.json"
+
+      - name: Ensure database schema exists
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+
+          database_url = os.environ["DATABASE_URL"]
+          sql = Path("sql/schema.sql").read_text(encoding="utf-8")
+          with psycopg.connect(database_url) as conn:
+              with conn.cursor() as cur:
+                  cur.execute(sql)
+              conn.commit()
+          print("Schema ready.")
+          PY
+
+      - name: Pull GAM report and write snapshot + send alerts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GAM_NETWORK_CODE: ${{ secrets.GAM_NETWORK_CODE }}
+          GAM_REPORT_ID: ${{ secrets.GAM_REPORT_ID }}
+          GAM_FIELD_MAP: ${{ secrets.GAM_FIELD_MAP }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/keys/gam-service-account.json
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          ALERT_TO_EMAIL: ${{ secrets.ALERT_TO_EMAIL }}
+          SMTP_USE_TLS: "true"
+        run: |
+          if [ -z "${GAM_REPORT_ID}" ]; then
+            echo "Missing GitHub secret: GAM_REPORT_ID"
+            exit 1
+          fi
+          python src/main.py --source gam --gam-report-id "${GAM_REPORT_ID}"
