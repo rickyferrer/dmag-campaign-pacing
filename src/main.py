@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--csv", help="Absolute path to pacing CSV export")
     parser.add_argument("--gam-report-id", help="Ad Manager interactive report ID")
     parser.add_argument("--dry-run", action="store_true", help="Skip DB write and email send")
+    parser.add_argument("--skip-email", action="store_true", help="Write snapshot but do not send email")
     args = parser.parse_args()
     if args.source == "csv" and not args.csv:
         parser.error("--csv is required when --source=csv")
@@ -549,7 +550,9 @@ def send_email_alert(body: str, subject: Optional[str] = None) -> None:
 
 
 def main() -> None:
-    load_dotenv(override=True)
+    # Keep CI/host environment variables authoritative (for example
+    # GOOGLE_APPLICATION_CREDENTIALS in GitHub Actions).
+    load_dotenv(override=False)
     args = parse_args()
     columns = load_column_map()
     if args.source == "csv":
@@ -573,6 +576,10 @@ def main() -> None:
         return
 
     write_snapshot_to_db(metrics)
+    if args.skip_email:
+        print("\nSnapshot written to DB. Email skipped.")
+        return
+
     send_email_alert(body)
     print("\nSnapshot written to DB and alert email sent.")
 
