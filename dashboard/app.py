@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from html import escape
 
 import pandas as pd
 import plotly.express as px
@@ -14,6 +15,15 @@ RISK_COLORS = {
     "medium": "#f59e0b",
     "watch": "#eab308",
     "on_track": "#22c55e",
+}
+
+PACE_COLORS = {
+    "At Risk": "#ef4444",
+    "Behind": "#f97316",
+    "Slightly Behind": "#f59e0b",
+    "On Track": "#22c55e",
+    "Ahead": "#3b82f6",
+    "Completed": "#94a3b8",
 }
 
 
@@ -54,6 +64,28 @@ def apply_theme() -> None:
           margin-top: 8px; color: #717182; font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap;
         }
         .dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; margin-right: 6px; }
+        .table-shell {
+          background: white; border-radius: 12px; border: 1px solid rgba(0,0,0,.08); overflow: hidden; margin-top: 10px;
+        }
+        .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .tbl th {
+          text-align: left; padding: 14px 12px; color: #111827; background: #f8fafc; border-bottom: 1px solid #e5e7eb; font-weight: 700;
+        }
+        .tbl td { padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #111827; }
+        .subtext { color:#6b7280; font-size:12px; margin-top: 2px; }
+        .chip {
+          display:inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent;
+        }
+        .chip-risk { color:#b91c1c; background:#fef2f2; border-color:#fecaca; }
+        .chip-behind { color:#c2410c; background:#fff7ed; border-color:#fed7aa; }
+        .chip-slight { color:#b45309; background:#fffbeb; border-color:#fde68a; }
+        .chip-ontrack { color:#166534; background:#f0fdf4; border-color:#bbf7d0; }
+        .chip-ahead { color:#1d4ed8; background:#eff6ff; border-color:#bfdbfe; }
+        .chip-complete { color:#475569; background:#f8fafc; border-color:#e2e8f0; }
+        .pace-wrap { position: relative; width: 180px; height: 12px; background: #e5e7eb; border-radius: 999px; }
+        .pace-fill { position: absolute; left:0; top:0; height: 12px; border-radius: 999px; }
+        .pace-marker { position: absolute; top: -2px; width: 2px; height: 16px; background: #475569; border-radius: 2px; opacity: .8; }
+        .num { font-weight: 600; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -85,6 +117,7 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
         goal_impressions,
         delivered_impressions,
         projected_final,
+        expected_to_date,
         required_daily_run_rate,
         pacing_pct,
         risk_level,
@@ -105,6 +138,114 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
     """
     with psycopg.connect(database_url) as conn:
         return pd.read_sql(query, conn)
+
+
+def pace_state(row: pd.Series) -> str:
+    today = pd.Timestamp.now().date()
+    end_date = row["end_date"].date() if pd.notna(row["end_date"]) else None
+    if end_date and end_date < today:
+        return "Completed"
+    p = float(row["pacing_pct"]) if pd.notna(row["pacing_pct"]) else 1.0
+    if p < 0.50:
+        return "At Risk"
+    if p < 0.75:
+        return "Behind"
+    if p < 0.90:
+        return "Slightly Behind"
+    if p <= 1.15:
+        return "On Track"
+    return "Ahead"
+
+
+def chip_class(state: str) -> str:
+    return {
+        "At Risk": "chip-risk",
+        "Behind": "chip-behind",
+        "Slightly Behind": "chip-slight",
+        "On Track": "chip-ontrack",
+        "Ahead": "chip-ahead",
+        "Completed": "chip-complete",
+    }.get(state, "chip-complete")
+
+
+def fmt_num(n: float) -> str:
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.0f}K"
+    return f"{int(n):,}"
+
+
+def render_custom_table(view: pd.DataFrame) -> None:
+    if view.empty:
+        st.info("No campaigns match current filters.")
+        return
+
+    rows = []
+    today = pd.Timestamp.now().date()
+    for _, r in view.iterrows():
+        state = pace_state(r)
+        bar_color = PACE_COLORS[state]
+        delivery_pct = max(min(float(r["delivery_pct_of_goal"]), 100.0), 0.0)
+        expected_pct = max(min((float(r["expected_to_date"]) / max(float(r["goal_impressions"]), 1)) * 100.0, 100.0), 0.0)
+        end_date = r["end_date"].date() if pd.notna(r["end_date"]) else None
+        start_date = r["start_date"].date() if pd.notna(r["start_date"]) else None
+        if end_date and end_date >= today:
+            days_left = (end_date - today).days
+            end_label = f"{days_left}d left"
+        else:
+            end_label = "Ended"
+        flight = f"{start_date.strftime('%b %-d') if start_date else '-'} – {end_date.strftime('%b %-d') if end_date else '-'}"
+
+        rows.append(
+            f"""
+            <tr>
+              <td><span class="chip {chip_class(state)}">{escape(state)}</span></td>
+              <td>{escape(str(r['advertiser'] or '-'))}</td>
+              <td>
+                <div>{escape(str(r['campaign_name']))}</div>
+                <div class="subtext">{escape(str(r['campaign_id']))}</div>
+              </td>
+              <td class="num">{fmt_num(float(r['goal_impressions']))}</td>
+              <td class="num">{fmt_num(float(r['delivered_impressions']))}</td>
+              <td>
+                <div class="pace-wrap">
+                  <div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div>
+                  <div class="pace-marker" style="left:{expected_pct:.1f}%;"></div>
+                </div>
+              </td>
+              <td>{delivery_pct:.1f}%</td>
+              <td>{expected_pct:.1f}%</td>
+              <td>{escape(flight)}</td>
+              <td>{escape(end_label)}</td>
+            </tr>
+            """
+        )
+
+    html = f"""
+    <div class="table-shell">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Advertiser</th>
+            <th>Order / Line Item</th>
+            <th>Goal</th>
+            <th>Delivered</th>
+            <th>Pacing</th>
+            <th>Actual %</th>
+            <th>Expected</th>
+            <th>Flight</th>
+            <th>End Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(rows)}
+        </tbody>
+      </table>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def main() -> None:
@@ -130,6 +271,8 @@ def main() -> None:
     df["delivery_pct_of_goal"] = (df["delivered_impressions"] / df["goal_impressions"]) * 100
     df["gap_to_goal"] = (df["goal_impressions"] - df["projected_final"]).clip(lower=0)
     df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"], errors="coerce")
+    df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
+    df["end_date"] = pd.to_datetime(df["end_date"], errors="coerce")
 
     last_updated = df["snapshot_ts"].max()
     last_updated_text = (
@@ -233,30 +376,11 @@ def main() -> None:
     if adv_filter:
         view = view[view["advertiser"].isin(adv_filter)]
 
-    st.markdown(f"##### Line Item Details  \n<span class='subtle'>{len(view)} of {len(df)} campaigns</span>", unsafe_allow_html=True)
-    display = view[
-        [
-            "campaign_id",
-            "status",
-            "advertiser",
-            "campaign_name",
-            "start_date",
-            "end_date",
-            "goal_impressions",
-            "delivered_impressions",
-            "delivery_pct_of_goal",
-            "projected_final",
-            "projected_pct_of_goal",
-            "required_daily_run_rate",
-            "risk_level",
-            "risk_reason",
-        ]
-    ].copy()
-    display["delivery_pct_of_goal"] = display["delivery_pct_of_goal"].round(1)
-    display["projected_pct_of_goal"] = display["projected_pct_of_goal"].round(1)
-    display["projected_final"] = display["projected_final"].round(0).astype(int)
-    display["required_daily_run_rate"] = display["required_daily_run_rate"].round(0).astype(int)
-    st.dataframe(display, use_container_width=True, height=540)
+    st.markdown(
+        f"##### Line Item Details  \n<span class='subtle'>{len(view)} of {len(df)} campaigns</span>",
+        unsafe_allow_html=True,
+    )
+    render_custom_table(view.sort_values(["risk_level", "pacing_pct"], ascending=[True, True]).head(200))
 
     st.markdown(
         """
