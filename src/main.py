@@ -333,12 +333,31 @@ def load_csv_metrics(csv_path: str, columns: Dict[str, str]) -> List[CampaignMet
 
 
 def _extract_report_value(cell) -> str:
-    # Cell uses a oneof with a single set value.
+    # Cell uses a oneof with a single set value. Depending on protobuf wrapper
+    # type, WhichOneof may live on cell or on cell._pb.
+    kind = None
     try:
         kind = cell.WhichOneof("value")
     except Exception:
-        kind = None
+        try:
+            kind = cell._pb.WhichOneof("value")
+        except Exception:
+            kind = None
     if not kind:
+        # Fallback for wrapper objects where oneof lookup is unavailable.
+        for candidate in (
+            "string_value",
+            "int64_value",
+            "double_value",
+            "bool_value",
+            "value",
+        ):
+            try:
+                value = getattr(cell, candidate, None)
+            except Exception:
+                value = None
+            if value not in (None, ""):
+                return str(value)
         return ""
     value = getattr(cell, kind, "")
     if kind == "date_value":
