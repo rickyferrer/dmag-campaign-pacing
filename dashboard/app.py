@@ -305,9 +305,9 @@ def main() -> None:
             st.cache_data.clear()
             st.rerun()
 
-    at_risk = int((df["risk_level"].isin(["high", "medium"])).sum())
+    at_risk = int((df["risk_level"] == "high").sum())
     st.markdown(
-        f"""<div class="banner">⚠️ {at_risk} campaigns are currently at risk (high/medium).</div>""",
+        f"""<div class="banner">⚠️ {at_risk} campaigns are currently at high risk.</div>""",
         unsafe_allow_html=True,
     )
 
