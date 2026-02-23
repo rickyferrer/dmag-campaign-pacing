@@ -67,7 +67,7 @@ def parse_date(raw: str) -> date:
     raw = raw.strip()
     if raw == "" or raw.lower() in {"unlimited", "n/a", "na", "none"}:
         raise ValueError(f"Unsupported date format: {raw}")
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+    for fmt in ("%Y-%m-%d", "%Y%m%d", "%m/%d/%Y", "%m/%d/%y"):
         try:
             return datetime.strptime(raw, fmt).date()
         except ValueError:
@@ -332,47 +332,46 @@ def load_csv_metrics(csv_path: str, columns: Dict[str, str]) -> List[CampaignMet
     return list(deduped.values())
 
 
-def _extract_report_value(cell) -> str:
-    # Cell uses a oneof with a single set value. Depending on protobuf wrapper
-    # type, WhichOneof may live on cell or on cell._pb.
-    kind = None
-    try:
-        kind = cell.WhichOneof("value")
-    except Exception:
-        try:
-            kind = cell._pb.WhichOneof("value")
-        except Exception:
-            kind = None
-    if not kind:
-        # Fallback for wrapper objects where oneof lookup is unavailable.
-        for candidate in (
-            "string_value",
-            "int64_value",
-            "double_value",
-            "bool_value",
-            "value",
-        ):
-            try:
-                value = getattr(cell, candidate, None)
-            except Exception:
-                value = None
-            if value not in (None, ""):
-                return str(value)
+def _pb_value_to_text(value) -> str:
+    """Convert protobuf/wrapper values into plain strings."""
+    # Simple scalar wrappers often expose ".value".
+    if hasattr(value, "value"):
+        wrapped = getattr(value, "value")
+        if wrapped not in (None, ""):
+            return str(wrapped)
+
+    # Date/date-time value objects.
+    year = getattr(value, "year", 0)
+    month = getattr(value, "month", 0)
+    day = getattr(value, "day", 0)
+    if year and month and day:
+        return f"{year:04d}-{month:02d}-{day:02d}"
+
+    # Generic protobuf message traversal.
+    if hasattr(value, "ListFields"):
+        fields = value.ListFields()
+        if not fields:
+            return ""
+        # Report values are oneof-like; use first populated field.
+        _, nested = fields[0]
+        return _pb_value_to_text(nested)
+
+    if value in (None, ""):
         return ""
-    value = getattr(cell, kind, "")
-    if kind == "date_value":
-        year = getattr(value, "year", 0)
-        month = getattr(value, "month", 0)
-        day = getattr(value, "day", 0)
-        if year and month and day:
-            return f"{year:04d}-{month:02d}-{day:02d}"
-    if kind == "date_time_value":
-        year = getattr(value, "year", 0)
-        month = getattr(value, "month", 0)
-        day = getattr(value, "day", 0)
-        if year and month and day:
-            return f"{year:04d}-{month:02d}-{day:02d}"
     return str(value)
+
+
+def _extract_report_value(cell) -> str:
+    # Use protobuf internals directly for the most compatible parsing across
+    # generated wrappers.
+    pb = getattr(cell, "_pb", cell)
+    if not hasattr(pb, "ListFields"):
+        return ""
+    fields = pb.ListFields()
+    if not fields:
+        return ""
+    _, value = fields[0]
+    return _pb_value_to_text(value)
 
 
 def fetch_gam_report_rows(network_code: str, report_id: str) -> List[List[str]]:
