@@ -363,6 +363,7 @@ def main() -> None:
     risk_filter = right.multiselect("Risk", ["high", "medium", "on_track"], default=["high", "medium"])
     advertisers = sorted([a for a in df["advertiser"].dropna().unique() if a])
     adv_filter = right2.multiselect("Advertiser", advertisers)
+    hide_ended = st.checkbox("Hide ended campaigns", value=True)
 
     view = df.copy()
     if search:
@@ -376,6 +377,9 @@ def main() -> None:
         view = view[view["risk_level"].isin(risk_filter)]
     if adv_filter:
         view = view[view["advertiser"].isin(adv_filter)]
+    if hide_ended:
+        today = pd.Timestamp.now().normalize()
+        view = view[(view["end_date"].isna()) | (view["end_date"] >= today)]
 
     # Default: campaigns ending soonest first. Allow user override.
     s1, s2 = st.columns([1.6, 1.0])
