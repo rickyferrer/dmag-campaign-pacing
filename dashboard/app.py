@@ -290,6 +290,14 @@ def render_custom_table(view: pd.DataFrame) -> None:
 
     today = pd.Timestamp.now().date()
     display_rows = []
+    status_badge = {
+        "At Risk": "🚨 At Risk",
+        "Behind": "↘️ Behind",
+        "Slightly Behind": "➖ Slightly Behind",
+        "On Track": "✅ On Track",
+        "Ahead": "📈 Ahead",
+        "Completed": "⚪ Completed",
+    }
     for _, r in view.iterrows():
         state = pace_state(r)
         delivery_pct = max(min(float(r["delivery_pct_of_goal"]), 100.0), 0.0)
@@ -304,12 +312,13 @@ def render_custom_table(view: pd.DataFrame) -> None:
         flight = f"{start_date.strftime('%b %-d') if start_date else '-'} – {end_date.strftime('%b %-d') if end_date else '-'}"
         display_rows.append(
             {
-                "Status": state,
+                "Status": status_badge.get(state, state),
                 "Order / Line Item": f'{str(r["campaign_name"])} ({str(r["campaign_id"])})',
                 "Goal": fmt_num(float(r["goal_impressions"])),
                 "Delivered": fmt_num(float(r["delivered_impressions"])),
-                "Actual %": f"{delivery_pct:.1f}%",
-                "Expected": f"{expected_pct:.1f}%",
+                "Pacing (Actual)": delivery_pct,
+                "Expected": expected_pct,
+                "Gap": delivery_pct - expected_pct,
                 "Flight": flight,
                 "End Date": end_label,
             }
@@ -319,6 +328,22 @@ def render_custom_table(view: pd.DataFrame) -> None:
         pd.DataFrame(display_rows),
         use_container_width=True,
         hide_index=True,
+        column_config={
+            "Status": st.column_config.TextColumn("Status"),
+            "Order / Line Item": st.column_config.TextColumn("Order / Line Item"),
+            "Goal": st.column_config.TextColumn("Goal"),
+            "Delivered": st.column_config.TextColumn("Delivered"),
+            "Pacing (Actual)": st.column_config.ProgressColumn(
+                "Pacing (Actual)",
+                min_value=0.0,
+                max_value=100.0,
+                format="%.1f%%",
+            ),
+            "Expected": st.column_config.NumberColumn("Expected", format="%.1f%%"),
+            "Gap": st.column_config.NumberColumn("Gap", format="%+.1fpp"),
+            "Flight": st.column_config.TextColumn("Flight"),
+            "End Date": st.column_config.TextColumn("End Date"),
+        },
     )
 
 
