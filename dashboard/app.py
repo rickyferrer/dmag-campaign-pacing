@@ -140,7 +140,10 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
         required_daily_run_rate,
         pacing_pct,
         risk_level,
-        risk_reason
+        risk_reason,
+        revenue,
+        ecpm,
+        viewability
       FROM campaign_pacing_snapshot
       ORDER BY campaign_id, snapshot_ts DESC
     )
@@ -193,6 +196,22 @@ def fmt_num(n: float) -> str:
     if n >= 1_000:
         return f"{n/1_000:.0f}K"
     return f"{int(n):,}"
+
+
+def fmt_compact_number(n: float) -> str:
+    if n >= 1_000_000:
+        return f"{n/1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"{n/1_000:.1f}K"
+    return f"{n:,.0f}"
+
+
+def fmt_money(n: float) -> str:
+    if n >= 1_000_000:
+        return f"${n/1_000_000:.2f}M"
+    if n >= 1_000:
+        return f"${n/1_000:.1f}K"
+    return f"${n:,.0f}"
 
 
 def render_custom_table(view: pd.DataFrame) -> None:
@@ -313,9 +332,38 @@ def main() -> None:
 
     total_goal = int(df["goal_impressions"].sum())
     total_delivered = int(df["delivered_impressions"].sum())
+    total_revenue = float(df["revenue"].fillna(0).sum()) if "revenue" in df.columns else 0.0
+    ecpm_value = (total_revenue * 1000 / max(total_delivered, 1)) if total_revenue > 0 and total_delivered > 0 else None
+    weighted_viewability = None
+    if "viewability" in df.columns:
+        vv = df[df["viewability"].notna() & df["delivered_impressions"].notna() & (df["delivered_impressions"] > 0)].copy()
+        if not vv.empty:
+            weighted_viewability = float((vv["viewability"] * vv["delivered_impressions"]).sum() / vv["delivered_impressions"].sum())
     high_count = int((df["risk_level"] == "high").sum())
     med_count = int((df["risk_level"] == "medium").sum())
     ontrack_count = int((df["risk_level"] == "on_track").sum())
+
+    ov1, ov2, ov3, ov4 = st.columns(4)
+    with ov1:
+        st.markdown(
+            f"""<div class="kpi"><div class="label">Impressions</div><div class="value">{fmt_compact_number(float(total_delivered))}</div></div>""",
+            unsafe_allow_html=True,
+        )
+    with ov2:
+        st.markdown(
+            f"""<div class="kpi"><div class="label">Revenue</div><div class="value">{fmt_money(total_revenue)}</div></div>""",
+            unsafe_allow_html=True,
+        )
+    with ov3:
+        st.markdown(
+            f"""<div class="kpi"><div class="label">eCPM</div><div class="value">{f'${ecpm_value:,.2f}' if ecpm_value is not None else 'N/A'}</div></div>""",
+            unsafe_allow_html=True,
+        )
+    with ov4:
+        st.markdown(
+            f"""<div class="kpi"><div class="label">Viewability</div><div class="value">{f'{weighted_viewability:.1f}%' if weighted_viewability is not None else 'N/A'}</div></div>""",
+            unsafe_allow_html=True,
+        )
 
     k1, k2, k3, k4 = st.columns(4)
     cards = [
@@ -330,33 +378,6 @@ def main() -> None:
                 f"""<div class="kpi"><div class="label">{label}</div><div class="value" style="color:{color};">{value}</div></div>""",
                 unsafe_allow_html=True,
             )
-
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown("##### Average Delivery by Advertiser")
-    adv = (
-        df.groupby("advertiser", dropna=False, as_index=False)
-        .agg(delivered=("delivered_impressions", "sum"), goal=("goal_impressions", "sum"))
-        .fillna({"advertiser": "Unknown"})
-    )
-    adv["delivery_pct"] = (adv["delivered"] / adv["goal"].replace(0, pd.NA) * 100).fillna(0)
-    adv = adv.sort_values("delivery_pct", ascending=False).head(15)
-    fig_adv = px.bar(
-        adv,
-        x="advertiser",
-        y="delivery_pct",
-        color="delivery_pct",
-        color_continuous_scale=["#e2e8f0", "#64748b", "#030213"],
-        labels={"advertiser": "", "delivery_pct": "% Delivered vs Goal"},
-    )
-    fig_adv.update_layout(
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        margin=dict(l=20, r=20, t=10, b=20),
-        coloraxis_showscale=False,
-        xaxis_tickangle=-30,
-    )
-    st.plotly_chart(fig_adv, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
     left, right, right2 = st.columns([2.0, 1.3, 1.3])
     search = left.text_input("Search line item/order", placeholder="Search by campaign name or ID")
