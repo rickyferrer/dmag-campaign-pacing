@@ -123,7 +123,22 @@ def get_database_url() -> str:
 
 @st.cache_data(ttl=300)
 def load_latest_campaigns(database_url: str) -> pd.DataFrame:
-    query = """
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'campaign_pacing_snapshot';
+                """
+            )
+            existing_cols = {row[0] for row in cur.fetchall()}
+
+    revenue_col = "revenue" if "revenue" in existing_cols else "NULL::double precision AS revenue"
+    ecpm_col = "ecpm" if "ecpm" in existing_cols else "NULL::double precision AS ecpm"
+    viewability_col = "viewability" if "viewability" in existing_cols else "NULL::double precision AS viewability"
+
+    query = f"""
     WITH latest AS (
       SELECT DISTINCT ON (campaign_id)
         snapshot_ts,
@@ -141,9 +156,9 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
         pacing_pct,
         risk_level,
         risk_reason,
-        revenue,
-        ecpm,
-        viewability
+        {revenue_col},
+        {ecpm_col},
+        {viewability_col}
       FROM campaign_pacing_snapshot
       ORDER BY campaign_id, snapshot_ts DESC
     )
