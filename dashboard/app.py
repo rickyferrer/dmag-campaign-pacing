@@ -67,11 +67,28 @@ def apply_theme() -> None:
         .table-shell {
           background: white; border-radius: 12px; border: 1px solid rgba(0,0,0,.08); overflow: hidden; margin-top: 10px;
         }
-        .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .tbl th {
-          text-align: left; padding: 14px 12px; color: #111827; background: #f8fafc; border-bottom: 1px solid #e5e7eb; font-weight: 700;
+        .tbl-head, .tbl-row {
+          display: grid;
+          grid-template-columns: 170px 190px 2.2fr 130px 130px 220px 95px 95px 170px 110px;
+          column-gap: 0px;
+          align-items: center;
         }
-        .tbl td { padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; color: #111827; }
+        .tbl-head {
+          background: #f8fafc;
+          border-bottom: 1px solid #e5e7eb;
+          font-weight: 700;
+          color: #111827;
+        }
+        .tbl-cell {
+          padding: 12px;
+          border-bottom: 1px solid #f1f5f9;
+          color: #111827;
+        }
+        .tbl-head .tbl-cell {
+          border-bottom: none;
+          padding-top: 14px;
+          padding-bottom: 14px;
+        }
         .subtext { color:#6b7280; font-size:12px; margin-top: 2px; }
         .chip {
           display:inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent;
@@ -199,50 +216,44 @@ def render_custom_table(view: pd.DataFrame) -> None:
 
         rows.append(
             f"""
-            <tr>
-              <td><span class="chip {chip_class(state)}">{escape(state)}</span></td>
-              <td>{escape(str(r['advertiser'] or '-'))}</td>
-              <td>
+            <div class="tbl-row">
+              <div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>
+              <div class="tbl-cell">{escape(str(r['advertiser'] or '-'))}</div>
+              <div class="tbl-cell">
                 <div>{escape(str(r['campaign_name']))}</div>
                 <div class="subtext">{escape(str(r['campaign_id']))}</div>
-              </td>
-              <td class="num">{fmt_num(float(r['goal_impressions']))}</td>
-              <td class="num">{fmt_num(float(r['delivered_impressions']))}</td>
-              <td>
+              </div>
+              <div class="tbl-cell num">{fmt_num(float(r['goal_impressions']))}</div>
+              <div class="tbl-cell num">{fmt_num(float(r['delivered_impressions']))}</div>
+              <div class="tbl-cell">
                 <div class="pace-wrap">
                   <div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div>
                   <div class="pace-marker" style="left:{expected_pct:.1f}%;"></div>
                 </div>
-              </td>
-              <td>{delivery_pct:.1f}%</td>
-              <td>{expected_pct:.1f}%</td>
-              <td>{escape(flight)}</td>
-              <td>{escape(end_label)}</td>
-            </tr>
+              </div>
+              <div class="tbl-cell">{delivery_pct:.1f}%</div>
+              <div class="tbl-cell">{expected_pct:.1f}%</div>
+              <div class="tbl-cell">{escape(flight)}</div>
+              <div class="tbl-cell">{escape(end_label)}</div>
+            </div>
             """
         )
 
     html = f"""
     <div class="table-shell">
-      <table class="tbl">
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Advertiser</th>
-            <th>Order / Line Item</th>
-            <th>Goal</th>
-            <th>Delivered</th>
-            <th>Pacing</th>
-            <th>Actual %</th>
-            <th>Expected</th>
-            <th>Flight</th>
-            <th>End Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          {''.join(rows)}
-        </tbody>
-      </table>
+      <div class="tbl-head">
+        <div class="tbl-cell">Status</div>
+        <div class="tbl-cell">Advertiser</div>
+        <div class="tbl-cell">Order / Line Item</div>
+        <div class="tbl-cell">Goal</div>
+        <div class="tbl-cell">Delivered</div>
+        <div class="tbl-cell">Pacing</div>
+        <div class="tbl-cell">Actual %</div>
+        <div class="tbl-cell">Expected</div>
+        <div class="tbl-cell">Flight</div>
+        <div class="tbl-cell">End Date</div>
+      </div>
+      {''.join(rows)}
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
