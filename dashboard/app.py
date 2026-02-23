@@ -35,16 +35,23 @@ def apply_theme() -> None:
           .block-container { padding-top: 5.25rem; }
         }
         .top-shell {
-          background: white; border: 1px solid rgba(0,0,0,.08); border-radius: 12px;
-          padding: 14px 18px; margin-bottom: 12px;
-          box-shadow: 0 1px 2px rgba(15,23,42,.05);
+          background: transparent; border: none; border-radius: 0;
+          padding: 0; margin: 0;
+          box-shadow: none;
         }
         .title-wrap { display:flex; align-items:center; gap:12px; }
         .title-icon {
-          width: 32px; height: 32px; border-radius: 10px; background: #030213;
+          width: 44px; height: 44px; border-radius: 14px; background: #030213;
           color: white; display:flex; align-items:center; justify-content:center;
-          font-size: 16px;
+          font-size: 18px;
         }
+        .main-title { font-size: 44px; font-weight: 700; color:#111827; line-height: 1.05; }
+        .header-subtle { color:#6b7280; font-size:14px; display:flex; align-items:center; gap:8px; margin-top:4px; }
+        .help-dot {
+          width: 28px; height: 28px; border: 1px solid #d1d5db; border-radius: 999px;
+          color:#6b7280; display:flex; align-items:center; justify-content:center; font-weight:700; margin-top: 10px;
+        }
+        .top-divider { border-bottom:1px solid #e5e7eb; margin:12px -1rem 14px -1rem; }
         .subtle { color:#717182; font-size:12px; }
         .details-head {
           display:flex; justify-content:space-between; align-items:center; margin-top:16px; margin-bottom:8px;
@@ -208,7 +215,9 @@ def load_latest_overview(database_url: str) -> pd.DataFrame:
       snapshot_ts,
       source_report_id,
       impressions_30d,
-      viewability_30d
+      viewability_30d,
+      impressions_prev_30d,
+      viewability_prev_30d
     FROM campaign_overview_snapshot
     ORDER BY snapshot_ts DESC
     LIMIT 2;
@@ -350,7 +359,7 @@ def main() -> None:
         last_updated.strftime("%b %d, %Y at %I:%M %p") if pd.notna(last_updated) else datetime.now().strftime("%b %d, %Y at %I:%M %p")
     )
 
-    top_a, top_b = st.columns([0.7, 0.3])
+    top_a, top_b = st.columns([0.73, 0.27])
     with top_a:
         st.markdown(
             f"""
@@ -358,8 +367,8 @@ def main() -> None:
               <div class="title-wrap">
                 <div class="title-icon">📊</div>
                 <div>
-                  <div style="font-size:22px; font-weight:700; color:#030213;">GAM Pacing Report</div>
-                  <div class="subtle">Last updated: {last_updated_text}</div>
+                  <div class="main-title">GAM Pacing Report</div>
+                  <div class="header-subtle">🕒 Last updated: {last_updated_text}</div>
                 </div>
               </div>
             </div>
@@ -367,11 +376,14 @@ def main() -> None:
             unsafe_allow_html=True,
         )
     with top_b:
+        hcol, ecol, rcol = st.columns([0.16, 0.46, 0.38])
+        hcol.markdown('<div class="help-dot">?</div>', unsafe_allow_html=True)
         csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button("Export CSV", csv, file_name=f"pacing-report-{datetime.now().date()}.csv", use_container_width=True)
-        if st.button("Refresh Data", use_container_width=True):
+        ecol.download_button("Export CSV", csv, file_name=f"pacing-report-{datetime.now().date()}.csv", use_container_width=True)
+        if rcol.button("Refresh", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+    st.markdown('<div class="top-divider"></div>', unsafe_allow_html=True)
 
     at_risk = int((df["risk_level"] == "high").sum())
     st.markdown(
@@ -389,11 +401,15 @@ def main() -> None:
         latest_row = overview_df.iloc[0]
         impressions_30d = int(latest_row["impressions_30d"]) if pd.notna(latest_row["impressions_30d"]) else impressions_30d
         viewability_30d = float(latest_row["viewability_30d"]) if pd.notna(latest_row["viewability_30d"]) else None
+        if "impressions_prev_30d" in latest_row and pd.notna(latest_row["impressions_prev_30d"]):
+            previous_impressions_30d = int(latest_row["impressions_prev_30d"])
+        if "viewability_prev_30d" in latest_row and pd.notna(latest_row["viewability_prev_30d"]):
+            previous_viewability_30d = float(latest_row["viewability_prev_30d"])
         if len(overview_df) > 1:
             prev_row = overview_df.iloc[1]
-            if pd.notna(prev_row["impressions_30d"]):
+            if previous_impressions_30d is None and pd.notna(prev_row["impressions_30d"]):
                 previous_impressions_30d = int(prev_row["impressions_30d"])
-            if pd.notna(prev_row["viewability_30d"]):
+            if previous_viewability_30d is None and pd.notna(prev_row["viewability_30d"]):
                 previous_viewability_30d = float(prev_row["viewability_30d"])
     high_count = int((df["risk_level"] == "high").sum())
     ontrack_count = int((df["risk_level"] == "on_track").sum())

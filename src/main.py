@@ -55,6 +55,8 @@ class CampaignMetrics:
 class OverviewMetrics:
     impressions_30d: int
     viewability_30d: Optional[float]
+    impressions_prev_30d: Optional[int] = None
+    viewability_prev_30d: Optional[float] = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -146,9 +148,14 @@ def load_gam_field_map() -> Dict[str, int]:
 
 def load_gam_overview_field_map() -> Dict[str, int]:
     default_map = {
-        "date": 0,
-        "impressions": 1,
-        "viewability": 2,
+        # Supports "totals + compare previous period" report layout.
+        # Example:
+        # 0=current impressions, 1=previous impressions, 2=impressions change,
+        # 3=current viewability, 4=previous viewability, 5=viewability change.
+        "impressions": 0,
+        "impressions_prev": 1,
+        "viewability": 3,
+        "viewability_prev": 4,
     }
     custom = os.getenv("GAM_OVERVIEW_FIELD_MAP", "").strip()
     if not custom:
@@ -515,20 +522,17 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
     total_impressions = 0
     weighted_viewability_sum = 0.0
     weighted_viewability_denominator = 0
+    total_impressions_prev = 0
+    weighted_viewability_prev_sum = 0.0
+    weighted_viewability_prev_denominator = 0
 
     for values in rows:
-        date_idx = field_map.get("date", 0)
-        imp_idx = field_map.get("impressions", 1)
-        view_idx = field_map.get("viewability", 2)
+        imp_idx = field_map.get("impressions", 0)
+        view_idx = field_map.get("viewability", 1)
+        imp_prev_idx = field_map.get("impressions_prev")
+        view_prev_idx = field_map.get("viewability_prev")
 
-        if len(values) <= max(date_idx, imp_idx):
-            continue
-
-        raw_date = values[date_idx]
-        try:
-            parse_date(raw_date)
-        except ValueError:
-            # Ignore non-data rows.
+        if len(values) <= imp_idx:
             continue
 
         impressions = parse_int(values[imp_idx])
@@ -540,13 +544,28 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
                 weighted_viewability_sum += (viewability * impressions)
                 weighted_viewability_denominator += impressions
 
+        if imp_prev_idx is not None and len(values) > imp_prev_idx:
+            impressions_prev = parse_int(values[imp_prev_idx])
+            total_impressions_prev += impressions_prev
+            if view_prev_idx is not None and len(values) > view_prev_idx:
+                viewability_prev = parse_float(values[view_prev_idx])
+                if viewability_prev is not None and impressions_prev > 0:
+                    weighted_viewability_prev_sum += (viewability_prev * impressions_prev)
+                    weighted_viewability_prev_denominator += impressions_prev
+
     weighted_viewability = None
     if weighted_viewability_denominator > 0:
         weighted_viewability = weighted_viewability_sum / weighted_viewability_denominator
 
+    weighted_viewability_prev = None
+    if weighted_viewability_prev_denominator > 0:
+        weighted_viewability_prev = weighted_viewability_prev_sum / weighted_viewability_prev_denominator
+
     return OverviewMetrics(
         impressions_30d=total_impressions,
         viewability_30d=weighted_viewability,
+        impressions_prev_30d=total_impressions_prev if total_impressions_prev > 0 else None,
+        viewability_prev_30d=weighted_viewability_prev,
     )
 
 
@@ -637,10 +656,18 @@ def write_overview_snapshot_to_db(report_id: str, overview: OverviewMetrics) -> 
                 INSERT INTO campaign_overview_snapshot (
                     source_report_id,
                     impressions_30d,
-                    viewability_30d
-                ) VALUES (%s, %s, %s);
+                    viewability_30d,
+                    impressions_prev_30d,
+                    viewability_prev_30d
+                ) VALUES (%s, %s, %s, %s, %s);
                 """,
-                (report_id, overview.impressions_30d, overview.viewability_30d),
+                (
+                    report_id,
+                    overview.impressions_30d,
+                    overview.viewability_30d,
+                    overview.impressions_prev_30d,
+                    overview.viewability_prev_30d,
+                ),
             )
         conn.commit()
 

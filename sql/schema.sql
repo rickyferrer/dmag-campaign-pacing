@@ -46,8 +46,16 @@ CREATE TABLE IF NOT EXISTS campaign_overview_snapshot (
     snapshot_ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     source_report_id TEXT NOT NULL,
     impressions_30d BIGINT NOT NULL,
-    viewability_30d DOUBLE PRECISION
+    viewability_30d DOUBLE PRECISION,
+    impressions_prev_30d BIGINT,
+    viewability_prev_30d DOUBLE PRECISION
 );
+
+ALTER TABLE campaign_overview_snapshot
+ADD COLUMN IF NOT EXISTS impressions_prev_30d BIGINT;
+
+ALTER TABLE campaign_overview_snapshot
+ADD COLUMN IF NOT EXISTS viewability_prev_30d DOUBLE PRECISION;
 
 CREATE INDEX IF NOT EXISTS idx_campaign_overview_snapshot_ts
 ON campaign_overview_snapshot (snapshot_ts DESC);
