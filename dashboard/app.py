@@ -289,62 +289,57 @@ def render_custom_table(view: pd.DataFrame) -> None:
         return
 
     today = pd.Timestamp.now().date()
-    display_rows = []
-    status_badge = {
-        "At Risk": "🚨 At Risk",
-        "Behind": "↘️ Behind",
-        "Slightly Behind": "➖ Slightly Behind",
-        "On Track": "✅ On Track",
-        "Ahead": "📈 Ahead",
-        "Completed": "⚪ Completed",
-    }
+    rows = []
     for _, r in view.iterrows():
         state = pace_state(r)
         delivery_pct = max(min(float(r["delivery_pct_of_goal"]), 100.0), 0.0)
         expected_pct = max(min((float(r["expected_to_date"]) / max(float(r["goal_impressions"]), 1)) * 100.0, 100.0), 0.0)
+        bar_color = PACE_COLORS.get(state, "#94a3b8")
         end_date = r["end_date"].date() if pd.notna(r["end_date"]) else None
         start_date = r["start_date"].date() if pd.notna(r["start_date"]) else None
+        end_class = ""
         if end_date and end_date >= today:
             days_left = (end_date - today).days
             end_label = f"{days_left}d left"
+            if days_left <= 5:
+                end_class = ' style="color:#dc2626;font-weight:700;"'
         else:
             end_label = "Ended"
+            end_class = ' style="color:#6b7280;"'
         flight = f"{start_date.strftime('%b %-d') if start_date else '-'} – {end_date.strftime('%b %-d') if end_date else '-'}"
-        display_rows.append(
-            {
-                "Status": status_badge.get(state, state),
-                "Order / Line Item": f'{str(r["campaign_name"])} ({str(r["campaign_id"])})',
-                "Goal": fmt_num(float(r["goal_impressions"])),
-                "Delivered": fmt_num(float(r["delivered_impressions"])),
-                "Pacing (Actual)": delivery_pct,
-                "Expected": expected_pct,
-                "Gap": delivery_pct - expected_pct,
-                "Flight": flight,
-                "End Date": end_label,
-            }
+        rows.append(
+            (
+                f'<div class="tbl-row">'
+                f'<div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>'
+                f'<div class="tbl-cell"><div>{escape(str(r["campaign_name"]))}</div><div class="subtext">{escape(str(r["campaign_id"]))}</div></div>'
+                f'<div class="tbl-cell num">{fmt_num(float(r["goal_impressions"]))}</div>'
+                f'<div class="tbl-cell num">{fmt_num(float(r["delivered_impressions"]))}</div>'
+                f'<div class="tbl-cell"><div class="pace-wrap"><div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div><div class="pace-marker" style="left:{expected_pct:.1f}%;"></div></div></div>'
+                f'<div class="tbl-cell">{delivery_pct:.1f}%</div>'
+                f'<div class="tbl-cell">{expected_pct:.1f}%</div>'
+                f'<div class="tbl-cell">{escape(flight)}</div>'
+                f'<div class="tbl-cell"{end_class}>{escape(end_label)}</div>'
+                f'</div>'
+            )
         )
 
-    st.dataframe(
-        pd.DataFrame(display_rows),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Status": st.column_config.TextColumn("Status"),
-            "Order / Line Item": st.column_config.TextColumn("Order / Line Item"),
-            "Goal": st.column_config.TextColumn("Goal"),
-            "Delivered": st.column_config.TextColumn("Delivered"),
-            "Pacing (Actual)": st.column_config.ProgressColumn(
-                "Pacing (Actual)",
-                min_value=0.0,
-                max_value=100.0,
-                format="%.1f%%",
-            ),
-            "Expected": st.column_config.NumberColumn("Expected", format="%.1f%%"),
-            "Gap": st.column_config.NumberColumn("Gap", format="%+.1fpp"),
-            "Flight": st.column_config.TextColumn("Flight"),
-            "End Date": st.column_config.TextColumn("End Date"),
-        },
+    html = (
+        '<div class="table-shell">'
+        '<div class="tbl-head">'
+        '<div class="tbl-cell">Status</div>'
+        '<div class="tbl-cell">Order / Line Item</div>'
+        '<div class="tbl-cell">Goal</div>'
+        '<div class="tbl-cell">Delivered</div>'
+        '<div class="tbl-cell">Pacing</div>'
+        '<div class="tbl-cell">Actual %</div>'
+        '<div class="tbl-cell">Expected</div>'
+        '<div class="tbl-cell">Flight</div>'
+        '<div class="tbl-cell">End Date</div>'
+        '</div>'
+        + "".join(rows)
+        + '</div>'
     )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def main() -> None:
