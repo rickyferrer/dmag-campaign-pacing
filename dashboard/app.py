@@ -409,12 +409,12 @@ def main() -> None:
             unsafe_allow_html=True,
         )
     with top_b:
-    ecol, rcol = st.columns([0.55, 0.45])
-    csv = df.to_csv(index=False).encode("utf-8")
-    ecol.download_button("Export CSV", csv, file_name=f"pacing-report-{datetime.now().date()}.csv", use_container_width=True)
-    if rcol.button("Refresh", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+        ecol, rcol = st.columns([0.55, 0.45])
+        csv = df.to_csv(index=False).encode("utf-8")
+        ecol.download_button("Export CSV", csv, file_name=f"pacing-report-{datetime.now().date()}.csv", use_container_width=True)
+        if rcol.button("Refresh", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
 
     st.markdown('<div class="top-divider"></div>', unsafe_allow_html=True)
 
