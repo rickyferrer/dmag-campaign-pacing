@@ -13,7 +13,6 @@ st.set_page_config(page_title="GAM Pacing Report", page_icon=":bar_chart:", layo
 RISK_COLORS = {
     "high": "#d4183d",
     "medium": "#f59e0b",
-    "watch": "#eab308",
     "on_track": "#22c55e",
 }
 
@@ -316,18 +315,16 @@ def main() -> None:
     total_delivered = int(df["delivered_impressions"].sum())
     high_count = int((df["risk_level"] == "high").sum())
     med_count = int((df["risk_level"] == "medium").sum())
-    watch_count = int((df["risk_level"] == "watch").sum())
     ontrack_count = int((df["risk_level"] == "on_track").sum())
 
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4 = st.columns(4)
     cards = [
         ("High Risk", f"{high_count}", RISK_COLORS["high"]),
         ("Medium Risk", f"{med_count}", RISK_COLORS["medium"]),
-        ("Watch", f"{watch_count}", RISK_COLORS["watch"]),
         ("On Track", f"{ontrack_count}", RISK_COLORS["on_track"]),
         ("Delivered / Goal", f"{(total_delivered / max(total_goal, 1)):.1%}", "#030213"),
     ]
-    for col, (label, value, color) in zip((k1, k2, k3, k4, k5), cards):
+    for col, (label, value, color) in zip((k1, k2, k3, k4), cards):
         with col:
             st.markdown(
                 f"""<div class="kpi"><div class="label">{label}</div><div class="value" style="color:{color};">{value}</div></div>""",
@@ -363,7 +360,7 @@ def main() -> None:
 
     left, right, right2 = st.columns([2.0, 1.3, 1.3])
     search = left.text_input("Search line item/order", placeholder="Search by campaign name or ID")
-    risk_filter = right.multiselect("Risk", ["high", "medium", "watch", "on_track"], default=["high", "medium", "watch"])
+    risk_filter = right.multiselect("Risk", ["high", "medium", "on_track"], default=["high", "medium"])
     advertisers = sorted([a for a in df["advertiser"].dropna().unique() if a])
     adv_filter = right2.multiselect("Advertiser", advertisers)
 
@@ -380,18 +377,47 @@ def main() -> None:
     if adv_filter:
         view = view[view["advertiser"].isin(adv_filter)]
 
+    # Default: campaigns ending soonest first. Allow user override.
+    s1, s2 = st.columns([1.6, 1.0])
+    sort_column_label = s1.selectbox(
+        "Sort by",
+        [
+            "End Date (Soonest First)",
+            "Campaign Name",
+            "Status",
+            "Goal",
+            "Delivered",
+            "Actual %",
+            "Expected %",
+        ],
+        index=0,
+    )
+    sort_direction = s2.selectbox("Direction", ["Ascending", "Descending"], index=0)
+
+    sort_column_map = {
+        "End Date (Soonest First)": "end_date",
+        "Campaign Name": "campaign_name",
+        "Status": "status",
+        "Goal": "goal_impressions",
+        "Delivered": "delivered_impressions",
+        "Actual %": "delivery_pct_of_goal",
+        "Expected %": "expected_to_date",
+    }
+    sort_col = sort_column_map[sort_column_label]
+    asc = sort_direction == "Ascending"
+    view = view.sort_values(sort_col, ascending=asc, na_position="last")
+
     st.markdown(
         f"##### Line Item Details  \n<span class='subtle'>{len(view)} of {len(df)} campaigns</span>",
         unsafe_allow_html=True,
     )
-    render_custom_table(view.sort_values(["risk_level", "pacing_pct"], ascending=[True, True]).head(200))
+    render_custom_table(view.head(200))
 
     st.markdown(
         """
         <div class="legend">
           <span><span class="dot" style="background:#d4183d"></span>High</span>
           <span><span class="dot" style="background:#f59e0b"></span>Medium</span>
-          <span><span class="dot" style="background:#eab308"></span>Watch</span>
           <span><span class="dot" style="background:#22c55e"></span>On Track</span>
         </div>
         """,
