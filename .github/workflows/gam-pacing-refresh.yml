@@ -59,7 +59,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GAM_NETWORK_CODE: ${{ secrets.GAM_NETWORK_CODE }}
           GAM_REPORT_ID: ${{ secrets.GAM_REPORT_ID }}
+          GAM_OVERVIEW_REPORT_ID: ${{ secrets.GAM_OVERVIEW_REPORT_ID }}
           GAM_FIELD_MAP: ${{ secrets.GAM_FIELD_MAP }}
+          GAM_OVERVIEW_FIELD_MAP: ${{ secrets.GAM_OVERVIEW_FIELD_MAP }}
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/keys/gam-service-account.json
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
