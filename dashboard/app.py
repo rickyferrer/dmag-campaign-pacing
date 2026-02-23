@@ -32,7 +32,10 @@ def apply_theme() -> None:
         """
         <style>
         .stApp { background: #f8f9fb; }
-        .block-container { padding-top: 1.25rem; max-width: 1440px; }
+        .block-container { padding-top: 4.5rem; max-width: 1440px; }
+        @media (max-width: 768px) {
+          .block-container { padding-top: 5.25rem; }
+        }
         .top-shell {
           background: white; border: 1px solid rgba(0,0,0,.08); border-radius: 12px;
           padding: 14px 18px; margin-bottom: 12px;
@@ -69,7 +72,7 @@ def apply_theme() -> None:
         }
         .tbl-head, .tbl-row {
           display: grid;
-          grid-template-columns: 170px 190px 2.2fr 130px 130px 220px 95px 95px 170px 110px;
+          grid-template-columns: 170px 2.3fr 130px 130px 220px 95px 95px 170px 110px;
           column-gap: 0px;
           align-items: center;
         }
@@ -218,7 +221,6 @@ def render_custom_table(view: pd.DataFrame) -> None:
             (
                 f'<div class="tbl-row">'
                 f'<div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>'
-                f'<div class="tbl-cell">{escape(str(r["advertiser"] or "-"))}</div>'
                 f'<div class="tbl-cell"><div>{escape(str(r["campaign_name"]))}</div><div class="subtext">{escape(str(r["campaign_id"]))}</div></div>'
                 f'<div class="tbl-cell num">{fmt_num(float(r["goal_impressions"]))}</div>'
                 f'<div class="tbl-cell num">{fmt_num(float(r["delivered_impressions"]))}</div>'
@@ -235,7 +237,6 @@ def render_custom_table(view: pd.DataFrame) -> None:
         '<div class="table-shell">'
         '<div class="tbl-head">'
         '<div class="tbl-cell">Status</div>'
-        '<div class="tbl-cell">Advertiser</div>'
         '<div class="tbl-cell">Order / Line Item</div>'
         '<div class="tbl-cell">Goal</div>'
         '<div class="tbl-cell">Delivered</div>'
