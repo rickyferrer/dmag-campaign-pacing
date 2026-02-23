@@ -52,6 +52,8 @@ def apply_theme() -> None:
           color:#6b7280; display:flex; align-items:center; justify-content:center; font-weight:700; margin-top: 10px;
         }
         .top-divider { border-bottom:1px solid #e5e7eb; margin:12px -1rem 14px -1rem; }
+        .header-gap { height: 18px; }
+        .cards-gap { height: 22px; }
         .subtle { color:#717182; font-size:12px; }
         .details-head {
           display:flex; justify-content:space-between; align-items:center; margin-top:16px; margin-bottom:8px;
@@ -417,6 +419,7 @@ def main() -> None:
             st.rerun()
 
     st.markdown('<div class="top-divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-gap"></div>', unsafe_allow_html=True)
 
     at_risk = int((df["risk_level"] == "high").sum())
     st.markdown(
@@ -479,6 +482,7 @@ def main() -> None:
                 f"""<div class="kpi"><div class="label">{label}</div><div class="value" style="color:{color};">{value}</div><div class="subtle">{delta_text}</div></div>""",
                 unsafe_allow_html=True,
             )
+    st.markdown('<div class="cards-gap"></div>', unsafe_allow_html=True)
 
     st.markdown(
         f"""
