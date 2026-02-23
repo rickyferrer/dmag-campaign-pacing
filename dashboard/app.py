@@ -460,7 +460,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3, c4, c5 = st.columns([2.3, 1.6, 1.6, 1.4, 1.4])
+    c1, c2, c3, c4, c5, c6 = st.columns([2.2, 1.5, 1.5, 1.3, 1.3, 1.0])
     search = c1.text_input(
         "Search orders or line items",
         placeholder="Search orders or line items...",
@@ -493,6 +493,7 @@ def main() -> None:
         label_visibility="collapsed",
         disabled=True,
     )
+    hide_completed = c6.checkbox("Hide completed", value=True)
 
     view = df.copy()
     if search:
@@ -506,6 +507,8 @@ def main() -> None:
         view = view[view["advertiser"] == adv_choice]
     if status_choice != "All Statuses":
         view = view[view["pace_state"] == status_choice]
+    if hide_completed:
+        view = view[view["pace_state"] != "Completed"]
 
     # Default sort: ending soonest first. Users can click table headers to re-sort.
     view = view.sort_values("end_date", ascending=True, na_position="last")
