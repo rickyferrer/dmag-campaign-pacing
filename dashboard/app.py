@@ -107,6 +107,10 @@ def apply_theme() -> None:
           padding-top: 14px;
           padding-bottom: 14px;
         }
+        .th-link {
+          color:#111827; text-decoration:none; font-weight:700;
+        }
+        .th-link:hover { text-decoration:underline; }
         .subtext { color:#6b7280; font-size:12px; margin-top: 2px; }
         .chip {
           display:inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent;
@@ -283,7 +287,16 @@ def fmt_compact_number(n: float) -> str:
     return f"{n:,.0f}"
 
 
-def render_custom_table(view: pd.DataFrame) -> None:
+def header_link(label: str, key: str, current_key: str, current_dir: str) -> str:
+    is_active = current_key == key
+    arrow = ""
+    if is_active:
+        arrow = " ↑" if current_dir == "asc" else " ↓"
+    next_dir = "desc" if (is_active and current_dir == "asc") else "asc"
+    return f'<a class="th-link" href="?sort={key}&dir={next_dir}">{escape(label)}{arrow}</a>'
+
+
+def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> None:
     if view.empty:
         st.info("No campaigns match current filters.")
         return
@@ -326,15 +339,15 @@ def render_custom_table(view: pd.DataFrame) -> None:
     html = (
         '<div class="table-shell">'
         '<div class="tbl-head">'
-        '<div class="tbl-cell">Status</div>'
-        '<div class="tbl-cell">Order / Line Item</div>'
-        '<div class="tbl-cell">Goal</div>'
-        '<div class="tbl-cell">Delivered</div>'
-        '<div class="tbl-cell">Pacing</div>'
-        '<div class="tbl-cell">Actual %</div>'
-        '<div class="tbl-cell">Expected</div>'
-        '<div class="tbl-cell">Flight</div>'
-        '<div class="tbl-cell">End Date</div>'
+        f'<div class="tbl-cell">{header_link("Status", "status", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Order / Line Item", "campaign_name", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Goal", "goal", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Delivered", "delivered", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Pacing", "actual_pct", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Actual %", "actual_pct", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Expected", "expected_pct", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Flight", "start_date", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("End Date", "end_date", sort_key, sort_dir)}</div>'
         '</div>'
         + "".join(rows)
         + '</div>'
@@ -396,13 +409,13 @@ def main() -> None:
             unsafe_allow_html=True,
         )
     with top_b:
-        hcol, ecol, rcol = st.columns([0.16, 0.46, 0.38])
-        hcol.markdown('<div class="help-dot">?</div>', unsafe_allow_html=True)
-        csv = df.to_csv(index=False).encode("utf-8")
-        ecol.download_button("Export CSV", csv, file_name=f"pacing-report-{datetime.now().date()}.csv", use_container_width=True)
-        if rcol.button("Refresh", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+    ecol, rcol = st.columns([0.55, 0.45])
+    csv = df.to_csv(index=False).encode("utf-8")
+    ecol.download_button("Export CSV", csv, file_name=f"pacing-report-{datetime.now().date()}.csv", use_container_width=True)
+    if rcol.button("Refresh", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
     st.markdown('<div class="top-divider"></div>', unsafe_allow_html=True)
 
     at_risk = int((df["risk_level"] == "high").sum())
@@ -480,7 +493,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3, c4, c5, c6 = st.columns([2.2, 1.5, 1.5, 1.3, 1.3, 1.0])
+    c1, c2, c4, c6 = st.columns([2.8, 1.8, 1.6, 1.0])
     search = c1.text_input(
         "Search orders or line items",
         placeholder="Search orders or line items...",
@@ -493,25 +506,11 @@ def main() -> None:
         index=0,
         label_visibility="collapsed",
     )
-    c3.selectbox(
-        "All Salespersons",
-        ["All Salespersons"],
-        index=0,
-        label_visibility="collapsed",
-        disabled=True,
-    )
     status_choice = c4.selectbox(
         "All Statuses",
         ["All Statuses", "At Risk", "Behind", "Slightly Behind", "On Track", "Ahead", "Completed"],
         index=0,
         label_visibility="collapsed",
-    )
-    c5.selectbox(
-        "All Types",
-        ["All Types"],
-        index=0,
-        label_visibility="collapsed",
-        disabled=True,
     )
     hide_completed = c6.checkbox("Hide completed", value=True)
 
@@ -530,10 +529,29 @@ def main() -> None:
     if hide_completed:
         view = view[view["pace_state"] != "Completed"]
 
-    # Default sort: ending soonest first. Users can click table headers to re-sort.
-    view = view.sort_values("end_date", ascending=True, na_position="last")
+    qp = st.query_params
+    requested_sort = str(qp.get("sort", "end_date"))
+    requested_dir = str(qp.get("dir", "asc")).lower()
+    if requested_dir not in {"asc", "desc"}:
+        requested_dir = "asc"
 
-    render_custom_table(view.head(200))
+    sort_map = {
+        "status": "pace_state",
+        "campaign_name": "campaign_name",
+        "goal": "goal_impressions",
+        "delivered": "delivered_impressions",
+        "actual_pct": "delivery_pct_of_goal",
+        "expected_pct": "expected_to_date",
+        "start_date": "start_date",
+        "end_date": "end_date",
+    }
+    if requested_sort not in sort_map:
+        requested_sort = "end_date"
+    sort_col = sort_map[requested_sort]
+    ascending = requested_dir == "asc"
+    view = view.sort_values(sort_col, ascending=ascending, na_position="last")
+
+    render_custom_table(view.head(200), requested_sort, requested_dir)
 
     st.markdown(
         """
