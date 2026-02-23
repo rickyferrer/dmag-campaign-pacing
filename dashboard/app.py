@@ -46,6 +46,16 @@ def apply_theme() -> None:
           font-size: 16px;
         }
         .subtle { color:#717182; font-size:12px; }
+        .details-head {
+          display:flex; justify-content:space-between; align-items:center; margin-top:16px; margin-bottom:8px;
+        }
+        .details-left { display:flex; align-items:center; gap:10px; }
+        .details-title { font-size:36px; font-weight:700; color:#27272a; line-height:1; }
+        .details-badge {
+          background:#e5e7eb; color:#6b7280; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:600;
+        }
+        .details-total { color:#6b7280; font-size:18px; font-weight:500; }
+        .details-total b { color:#27272a; }
         .banner {
           border-radius: 10px; padding: 10px 14px; margin: 8px 0 14px 0;
           border: 1px solid #fee2e2; background: #fff5f7; color: #9f1239;
@@ -104,6 +114,21 @@ def apply_theme() -> None:
         .pace-fill { position: absolute; left:0; top:0; height: 12px; border-radius: 999px; }
         .pace-marker { position: absolute; top: -2px; width: 2px; height: 16px; background: #475569; border-radius: 2px; opacity: .8; }
         .num { font-weight: 600; }
+
+        /* Filter row styling to match design */
+        div[data-testid="stTextInput"] input {
+          background:#f3f4f6 !important;
+          border:1px solid #e5e7eb !important;
+          border-radius:12px !important;
+          min-height:46px !important;
+          font-size:16px !important;
+        }
+        div[data-testid="stSelectbox"] > div > div {
+          background:#f3f4f6 !important;
+          border:1px solid #e5e7eb !important;
+          border-radius:12px !important;
+          min-height:46px !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -176,6 +201,35 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
         return pd.read_sql(query, conn)
 
 
+@st.cache_data(ttl=300)
+def load_latest_overview(database_url: str) -> pd.DataFrame:
+    query = """
+    SELECT
+      snapshot_ts,
+      source_report_id,
+      impressions_30d,
+      viewability_30d
+    FROM campaign_overview_snapshot
+    ORDER BY snapshot_ts DESC
+    LIMIT 2;
+    """
+    with psycopg.connect(database_url) as conn:
+        return pd.read_sql(query, conn)
+
+
+def format_delta(curr: float, prev: float, suffix: str = "") -> str:
+    if prev == 0:
+        return "n/a vs previous period"
+    abs_delta = curr - prev
+    pct_delta = (abs_delta / prev) * 100.0
+    sign = "+" if abs_delta >= 0 else "-"
+    if suffix:
+        abs_text = f"{abs(abs_delta):.1f}"
+    else:
+        abs_text = fmt_compact_number(abs(abs_delta))
+    return f"{sign}{abs_text}{suffix} ({sign}{abs(pct_delta):.1f}%) vs previous period"
+
+
 def pace_state(row: pd.Series) -> str:
     today = pd.Timestamp.now().date()
     end_date = row["end_date"].date() if pd.notna(row["end_date"]) else None
@@ -225,11 +279,10 @@ def render_custom_table(view: pd.DataFrame) -> None:
         st.info("No campaigns match current filters.")
         return
 
-    rows = []
     today = pd.Timestamp.now().date()
+    display_rows = []
     for _, r in view.iterrows():
         state = pace_state(r)
-        bar_color = PACE_COLORS[state]
         delivery_pct = max(min(float(r["delivery_pct_of_goal"]), 100.0), 0.0)
         expected_pct = max(min((float(r["expected_to_date"]) / max(float(r["goal_impressions"]), 1)) * 100.0, 100.0), 0.0)
         end_date = r["end_date"].date() if pd.notna(r["end_date"]) else None
@@ -240,40 +293,24 @@ def render_custom_table(view: pd.DataFrame) -> None:
         else:
             end_label = "Ended"
         flight = f"{start_date.strftime('%b %-d') if start_date else '-'} – {end_date.strftime('%b %-d') if end_date else '-'}"
-
-        rows.append(
-            (
-                f'<div class="tbl-row">'
-                f'<div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>'
-                f'<div class="tbl-cell"><div>{escape(str(r["campaign_name"]))}</div><div class="subtext">{escape(str(r["campaign_id"]))}</div></div>'
-                f'<div class="tbl-cell num">{fmt_num(float(r["goal_impressions"]))}</div>'
-                f'<div class="tbl-cell num">{fmt_num(float(r["delivered_impressions"]))}</div>'
-                f'<div class="tbl-cell"><div class="pace-wrap"><div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div><div class="pace-marker" style="left:{expected_pct:.1f}%;"></div></div></div>'
-                f'<div class="tbl-cell">{delivery_pct:.1f}%</div>'
-                f'<div class="tbl-cell">{expected_pct:.1f}%</div>'
-                f'<div class="tbl-cell">{escape(flight)}</div>'
-                f'<div class="tbl-cell">{escape(end_label)}</div>'
-                f'</div>'
-            )
+        display_rows.append(
+            {
+                "Status": state,
+                "Order / Line Item": f'{str(r["campaign_name"])} ({str(r["campaign_id"])})',
+                "Goal": fmt_num(float(r["goal_impressions"])),
+                "Delivered": fmt_num(float(r["delivered_impressions"])),
+                "Actual %": f"{delivery_pct:.1f}%",
+                "Expected": f"{expected_pct:.1f}%",
+                "Flight": flight,
+                "End Date": end_label,
+            }
         )
 
-    html = (
-        '<div class="table-shell">'
-        '<div class="tbl-head">'
-        '<div class="tbl-cell">Status</div>'
-        '<div class="tbl-cell">Order / Line Item</div>'
-        '<div class="tbl-cell">Goal</div>'
-        '<div class="tbl-cell">Delivered</div>'
-        '<div class="tbl-cell">Pacing</div>'
-        '<div class="tbl-cell">Actual %</div>'
-        '<div class="tbl-cell">Expected</div>'
-        '<div class="tbl-cell">Flight</div>'
-        '<div class="tbl-cell">End Date</div>'
-        "</div>"
-        + "".join(rows)
-        + "</div>"
+    st.dataframe(
+        pd.DataFrame(display_rows),
+        use_container_width=True,
+        hide_index=True,
     )
-    st.markdown(html, unsafe_allow_html=True)
 
 
 def main() -> None:
@@ -289,6 +326,11 @@ def main() -> None:
         st.error(f"Failed to load campaign data: {exc}")
         st.stop()
 
+    try:
+        overview_df = load_latest_overview(database_url)
+    except Exception:
+        overview_df = pd.DataFrame()
+
     if df.empty:
         st.warning("No campaign snapshots found yet. Run the ingestion script first.")
         st.stop()
@@ -301,6 +343,7 @@ def main() -> None:
     df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"], errors="coerce")
     df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
     df["end_date"] = pd.to_datetime(df["end_date"], errors="coerce")
+    df["pace_state"] = df.apply(pace_state, axis=1)
 
     last_updated = df["snapshot_ts"].max()
     last_updated_text = (
@@ -338,45 +381,102 @@ def main() -> None:
 
     total_goal = int(df["goal_impressions"].sum())
     total_delivered = int(df["delivered_impressions"].sum())
-    weighted_viewability = None
-    if "viewability" in df.columns:
-        vv = df[df["viewability"].notna() & df["delivered_impressions"].notna() & (df["delivered_impressions"] > 0)].copy()
-        if not vv.empty:
-            weighted_viewability = float((vv["viewability"] * vv["delivered_impressions"]).sum() / vv["delivered_impressions"].sum())
+    impressions_30d = total_delivered
+    viewability_30d = None
+    previous_impressions_30d = None
+    previous_viewability_30d = None
+    if not overview_df.empty:
+        latest_row = overview_df.iloc[0]
+        impressions_30d = int(latest_row["impressions_30d"]) if pd.notna(latest_row["impressions_30d"]) else impressions_30d
+        viewability_30d = float(latest_row["viewability_30d"]) if pd.notna(latest_row["viewability_30d"]) else None
+        if len(overview_df) > 1:
+            prev_row = overview_df.iloc[1]
+            if pd.notna(prev_row["impressions_30d"]):
+                previous_impressions_30d = int(prev_row["impressions_30d"])
+            if pd.notna(prev_row["viewability_30d"]):
+                previous_viewability_30d = float(prev_row["viewability_30d"])
     high_count = int((df["risk_level"] == "high").sum())
     ontrack_count = int((df["risk_level"] == "on_track").sum())
 
-    ov1, ov2 = st.columns(2)
-    with ov1:
-        st.markdown(
-            f"""<div class="kpi"><div class="label">Impressions (Last 30 Days)</div><div class="value">{fmt_compact_number(float(total_delivered))}</div></div>""",
-            unsafe_allow_html=True,
-        )
-    with ov2:
-        st.markdown(
-            f"""<div class="kpi"><div class="label">Viewability (Last 30 Days)</div><div class="value">{f'{weighted_viewability:.1f}%' if weighted_viewability is not None else 'N/A'}</div></div>""",
-            unsafe_allow_html=True,
-        )
+    impressions_delta = None
+    if previous_impressions_30d is not None:
+        impressions_delta = format_delta(float(impressions_30d), float(previous_impressions_30d))
 
-    k1, k2, k3 = st.columns(3)
+    viewability_delta = None
+    if viewability_30d is not None and previous_viewability_30d is not None:
+        viewability_delta = format_delta(float(viewability_30d), float(previous_viewability_30d), suffix="pp")
+
     cards = [
-        ("High Risk", f"{high_count}", RISK_COLORS["high"]),
-        ("On Track", f"{ontrack_count}", RISK_COLORS["on_track"]),
-        ("Delivered / Goal", f"{(total_delivered / max(total_goal, 1)):.1%}", "#030213"),
+        (
+            "Impressions (Last 30 Days)",
+            f"{fmt_compact_number(float(impressions_30d))}",
+            "#030213",
+            impressions_delta or "n/a vs previous period",
+        ),
+        (
+            "Viewability (Last 30 Days)",
+            f"{f'{viewability_30d:.1f}%' if viewability_30d is not None else 'N/A'}",
+            "#030213",
+            viewability_delta or "n/a vs previous period",
+        ),
+        ("High Risk", f"{high_count}", RISK_COLORS["high"], ""),
+        ("On Track", f"{ontrack_count}", RISK_COLORS["on_track"], ""),
+        ("Delivered / Goal", f"{(total_delivered / max(total_goal, 1)):.1%}", "#030213", ""),
     ]
-    for col, (label, value, color) in zip((k1, k2, k3), cards):
+    kpi_cols = st.columns(len(cards))
+    for col, (label, value, color, delta_text) in zip(kpi_cols, cards):
         with col:
             st.markdown(
-                f"""<div class="kpi"><div class="label">{label}</div><div class="value" style="color:{color};">{value}</div></div>""",
+                f"""<div class="kpi"><div class="label">{label}</div><div class="value" style="color:{color};">{value}</div><div class="subtle">{delta_text}</div></div>""",
                 unsafe_allow_html=True,
             )
 
-    left, right, right2 = st.columns([2.0, 1.3, 1.3])
-    search = left.text_input("Search line item/order", placeholder="Search by campaign name or ID")
-    risk_filter = right.multiselect("Risk", ["high", "medium", "on_track"], default=["high", "medium"])
+    st.markdown(
+        f"""
+        <div class="details-head">
+          <div class="details-left">
+            <div class="details-title">Line Item Details</div>
+            <span class="details-badge">{len(df)} of {len(df)}</span>
+          </div>
+          <div class="details-total">Total Delivered: <b>{fmt_compact_number(float(total_delivered))}</b> / <b>{fmt_compact_number(float(total_goal))}</b> goal</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4, c5 = st.columns([2.3, 1.6, 1.6, 1.4, 1.4])
+    search = c1.text_input(
+        "Search orders or line items",
+        placeholder="Search orders or line items...",
+        label_visibility="collapsed",
+    )
     advertisers = sorted([a for a in df["advertiser"].dropna().unique() if a])
-    adv_filter = right2.multiselect("Advertiser", advertisers)
-    hide_ended = st.checkbox("Hide ended campaigns", value=True)
+    adv_choice = c2.selectbox(
+        "All Advertisers",
+        ["All Advertisers"] + advertisers,
+        index=0,
+        label_visibility="collapsed",
+    )
+    c3.selectbox(
+        "All Salespersons",
+        ["All Salespersons"],
+        index=0,
+        label_visibility="collapsed",
+        disabled=True,
+    )
+    status_choice = c4.selectbox(
+        "All Statuses",
+        ["All Statuses", "At Risk", "Behind", "Slightly Behind", "On Track", "Ahead", "Completed"],
+        index=0,
+        label_visibility="collapsed",
+    )
+    c5.selectbox(
+        "All Types",
+        ["All Types"],
+        index=0,
+        label_visibility="collapsed",
+        disabled=True,
+    )
 
     view = df.copy()
     if search:
@@ -386,48 +486,14 @@ def main() -> None:
             | view["campaign_id"].astype(str).str.contains(s, na=False)
             | view["advertiser"].astype(str).str.lower().str.contains(s, na=False)
         ]
-    if risk_filter:
-        view = view[view["risk_level"].isin(risk_filter)]
-    if adv_filter:
-        view = view[view["advertiser"].isin(adv_filter)]
-    if hide_ended:
-        today = pd.Timestamp.now().normalize()
-        view = view[(view["end_date"].isna()) | (view["end_date"] >= today)]
+    if adv_choice != "All Advertisers":
+        view = view[view["advertiser"] == adv_choice]
+    if status_choice != "All Statuses":
+        view = view[view["pace_state"] == status_choice]
 
-    # Default: campaigns ending soonest first. Allow user override.
-    s1, s2 = st.columns([1.6, 1.0])
-    sort_column_label = s1.selectbox(
-        "Sort by",
-        [
-            "End Date (Soonest First)",
-            "Campaign Name",
-            "Status",
-            "Goal",
-            "Delivered",
-            "Actual %",
-            "Expected %",
-        ],
-        index=0,
-    )
-    sort_direction = s2.selectbox("Direction", ["Ascending", "Descending"], index=0)
+    # Default sort: ending soonest first. Users can click table headers to re-sort.
+    view = view.sort_values("end_date", ascending=True, na_position="last")
 
-    sort_column_map = {
-        "End Date (Soonest First)": "end_date",
-        "Campaign Name": "campaign_name",
-        "Status": "status",
-        "Goal": "goal_impressions",
-        "Delivered": "delivered_impressions",
-        "Actual %": "delivery_pct_of_goal",
-        "Expected %": "expected_to_date",
-    }
-    sort_col = sort_column_map[sort_column_label]
-    asc = sort_direction == "Ascending"
-    view = view.sort_values(sort_col, ascending=asc, na_position="last")
-
-    st.markdown(
-        f"##### Line Item Details  \n<span class='subtle'>{len(view)} of {len(df)} campaigns</span>",
-        unsafe_allow_html=True,
-    )
     render_custom_table(view.head(200))
 
     st.markdown(

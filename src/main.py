@@ -46,6 +46,15 @@ class CampaignMetrics:
     required_daily_run_rate: float
     risk_level: str
     risk_reason: str
+    revenue: Optional[float]
+    ecpm: Optional[float]
+    viewability: Optional[float]
+
+
+@dataclass
+class OverviewMetrics:
+    impressions_30d: int
+    viewability_30d: Optional[float]
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +62,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source", choices=["csv", "gam"], default="csv", help="Input source")
     parser.add_argument("--csv", help="Absolute path to pacing CSV export")
     parser.add_argument("--gam-report-id", help="Ad Manager interactive report ID")
+    parser.add_argument(
+        "--gam-overview-report-id",
+        help="Ad Manager interactive report ID for 30-day overview metrics",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Skip DB write and email send")
     parser.add_argument("--skip-email", action="store_true", help="Write snapshot but do not send email")
     args = parser.parse_args()
@@ -87,6 +100,16 @@ def parse_int(raw: str) -> int:
     return int(float(clean))
 
 
+def parse_float(raw: str) -> Optional[float]:
+    clean = re.sub(r"[^0-9.-]", "", str(raw).strip())
+    if clean == "":
+        return None
+    try:
+        return float(clean)
+    except ValueError:
+        return None
+
+
 def load_column_map() -> Dict[str, str]:
     custom = os.getenv("CSV_COLUMN_MAP", "").strip()
     if not custom:
@@ -107,8 +130,27 @@ def load_gam_field_map() -> Dict[str, int]:
         "end_date": 6,  # END
         "delivered_impressions": 8,  # IMPRESSIONS
         "goal_impressions": 9,  # GOAL
+        # Optional columns (if present in report)
+        # "revenue": 10,
+        # "ecpm": 11,
+        # "viewability": 12,
     }
     custom = os.getenv("GAM_FIELD_MAP", "").strip()
+    if not custom:
+        return default_map
+    parsed = json.loads(custom)
+    merged = default_map.copy()
+    merged.update({k: int(v) for k, v in parsed.items()})
+    return merged
+
+
+def load_gam_overview_field_map() -> Dict[str, int]:
+    default_map = {
+        "date": 0,
+        "impressions": 1,
+        "viewability": 2,
+    }
+    custom = os.getenv("GAM_OVERVIEW_FIELD_MAP", "").strip()
     if not custom:
         return default_map
     parsed = json.loads(custom)
@@ -204,6 +246,12 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
         ],
     )
     status_col = best_available_column(row, ["status", "Status", "Ad unit status", "Line item status"])
+    revenue_col = best_available_column(row, ["revenue", "Revenue", "Ad server CPM and CPC revenue"])
+    ecpm_col = best_available_column(row, ["ecpm", "eCPM", "Ad server eCPM and CPC"])
+    viewability_col = best_available_column(
+        row,
+        ["viewability", "Viewability", "Active View viewable rate", "Active View: Viewable rate"],
+    )
     campaign_name_col = best_available_column(
         row,
         [columns["campaign_name"], "Campaign", "Line Item", "Line item", "Advertiser", "Order"],
@@ -220,6 +268,9 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
     goal = parse_int(row[goal_col])
     delivered = parse_int(row[delivered_col])
     status = str(row.get(status_col or "", "")).strip() if status_col else ""
+    revenue = parse_float(row.get(revenue_col, "")) if revenue_col else None
+    ecpm = parse_float(row.get(ecpm_col, "")) if ecpm_col else None
+    viewability = parse_float(row.get(viewability_col, "")) if viewability_col else None
     derived_id = f"{advertiser}|{campaign_name}|{start_date.isoformat()}|{end_date.isoformat()}|{goal}"
     campaign_id = str(row.get(campaign_id_col, "")).strip() if campaign_id_col else derived_id
     if not campaign_id:
@@ -250,6 +301,9 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
             required_daily_run_rate=goal / max(days_remaining, 1),
             risk_level="on_track",
             risk_reason="Campaign has not started yet.",
+            revenue=revenue,
+            ecpm=ecpm,
+            viewability=viewability,
         )
     total_days = max((end_date - start_date).days + 1, 1)
     days_elapsed_raw = (today - start_date).days + 1
@@ -294,6 +348,9 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
         required_daily_run_rate=required_daily_run_rate,
         risk_level=risk_level,
         risk_reason=risk_reason,
+        revenue=revenue,
+        ecpm=ecpm,
+        viewability=viewability,
     )
 
 
@@ -429,6 +486,12 @@ def load_gam_metrics(report_id: str, columns: Dict[str, str]) -> List[CampaignMe
                 else "",
                 "goal_impressions": values[field_map["goal_impressions"]] if len(values) > field_map["goal_impressions"] else "",
             }
+            if "revenue" in field_map:
+                row["revenue"] = values[field_map["revenue"]] if len(values) > field_map["revenue"] else ""
+            if "ecpm" in field_map:
+                row["ecpm"] = values[field_map["ecpm"]] if len(values) > field_map["ecpm"] else ""
+            if "viewability" in field_map:
+                row["viewability"] = values[field_map["viewability"]] if len(values) > field_map["viewability"] else ""
             output.append(compute_metrics(row, columns, today))
         except (ValueError, KeyError, IndexError):
             skipped += 1
@@ -437,6 +500,54 @@ def load_gam_metrics(report_id: str, columns: Dict[str, str]) -> List[CampaignMe
     if skipped:
         print(f"Skipped {skipped} GAM rows that did not match field map.")
     return output
+
+
+def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
+    network_code = os.getenv("GAM_NETWORK_CODE", "").strip()
+    if not network_code:
+        raise RuntimeError("GAM_NETWORK_CODE is required for GAM overview loading")
+
+    field_map = load_gam_overview_field_map()
+    rows = fetch_gam_report_rows(network_code=network_code, report_id=report_id)
+    if not rows:
+        return OverviewMetrics(impressions_30d=0, viewability_30d=None)
+
+    total_impressions = 0
+    weighted_viewability_sum = 0.0
+    weighted_viewability_denominator = 0
+
+    for values in rows:
+        date_idx = field_map.get("date", 0)
+        imp_idx = field_map.get("impressions", 1)
+        view_idx = field_map.get("viewability", 2)
+
+        if len(values) <= max(date_idx, imp_idx):
+            continue
+
+        raw_date = values[date_idx]
+        try:
+            parse_date(raw_date)
+        except ValueError:
+            # Ignore non-data rows.
+            continue
+
+        impressions = parse_int(values[imp_idx])
+        total_impressions += impressions
+
+        if len(values) > view_idx:
+            viewability = parse_float(values[view_idx])
+            if viewability is not None and impressions > 0:
+                weighted_viewability_sum += (viewability * impressions)
+                weighted_viewability_denominator += impressions
+
+    weighted_viewability = None
+    if weighted_viewability_denominator > 0:
+        weighted_viewability = weighted_viewability_sum / weighted_viewability_denominator
+
+    return OverviewMetrics(
+        impressions_30d=total_impressions,
+        viewability_30d=weighted_viewability,
+    )
 
 
 def write_snapshot_to_db(metrics: List[CampaignMetrics]) -> None:
@@ -468,6 +579,9 @@ def write_snapshot_to_db(metrics: List[CampaignMetrics]) -> None:
             m.required_daily_run_rate,
             m.risk_level,
             m.risk_reason,
+            m.revenue,
+            m.ecpm,
+            m.viewability,
         )
         for m in metrics
     ]
@@ -493,12 +607,40 @@ def write_snapshot_to_db(metrics: List[CampaignMetrics]) -> None:
                     projected_final,
                     required_daily_run_rate,
                     risk_level,
-                    risk_reason
+                    risk_reason,
+                    revenue,
+                    ecpm,
+                    viewability
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 );
                 """,
                 rows,
+            )
+        conn.commit()
+
+
+def write_overview_snapshot_to_db(report_id: str, overview: OverviewMetrics) -> None:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required for DB writes.")
+
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("psycopg is not installed. Run: pip install -r requirements.txt") from exc
+
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO campaign_overview_snapshot (
+                    source_report_id,
+                    impressions_30d,
+                    viewability_30d
+                ) VALUES (%s, %s, %s);
+                """,
+                (report_id, overview.impressions_30d, overview.viewability_30d),
             )
         conn.commit()
 
@@ -575,8 +717,14 @@ def main() -> None:
     columns = load_column_map()
     if args.source == "csv":
         metrics = load_csv_metrics(args.csv, columns)
+        overview_metrics = None
+        overview_report_id = None
     else:
         metrics = load_gam_metrics(args.gam_report_id, columns)
+        overview_report_id = (args.gam_overview_report_id or os.getenv("GAM_OVERVIEW_REPORT_ID", "")).strip()
+        overview_metrics = None
+        if overview_report_id:
+            overview_metrics = load_gam_overview_metrics(overview_report_id)
 
     risk_counts = {}
     for m in metrics:
@@ -589,11 +737,24 @@ def main() -> None:
     body = format_alert_body(metrics)
     print("\nAlert preview:\n")
     print(body)
+    if overview_metrics is not None:
+        print("\nOverview preview:\n")
+        viewability_text = (
+            f"{overview_metrics.viewability_30d:.1f}%"
+            if overview_metrics.viewability_30d is not None
+            else "N/A"
+        )
+        print(
+            f"Impressions (Last 30 Days): {overview_metrics.impressions_30d:,}\n"
+            f"Viewability (Last 30 Days): {viewability_text}"
+        )
 
     if args.dry_run:
         return
 
     write_snapshot_to_db(metrics)
+    if overview_metrics is not None and overview_report_id:
+        write_overview_snapshot_to_db(overview_report_id, overview_metrics)
     if args.skip_email:
         print("\nSnapshot written to DB. Email skipped.")
         return
