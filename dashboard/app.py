@@ -215,47 +215,39 @@ def render_custom_table(view: pd.DataFrame) -> None:
         flight = f"{start_date.strftime('%b %-d') if start_date else '-'} – {end_date.strftime('%b %-d') if end_date else '-'}"
 
         rows.append(
-            f"""
-            <div class="tbl-row">
-              <div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>
-              <div class="tbl-cell">{escape(str(r['advertiser'] or '-'))}</div>
-              <div class="tbl-cell">
-                <div>{escape(str(r['campaign_name']))}</div>
-                <div class="subtext">{escape(str(r['campaign_id']))}</div>
-              </div>
-              <div class="tbl-cell num">{fmt_num(float(r['goal_impressions']))}</div>
-              <div class="tbl-cell num">{fmt_num(float(r['delivered_impressions']))}</div>
-              <div class="tbl-cell">
-                <div class="pace-wrap">
-                  <div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div>
-                  <div class="pace-marker" style="left:{expected_pct:.1f}%;"></div>
-                </div>
-              </div>
-              <div class="tbl-cell">{delivery_pct:.1f}%</div>
-              <div class="tbl-cell">{expected_pct:.1f}%</div>
-              <div class="tbl-cell">{escape(flight)}</div>
-              <div class="tbl-cell">{escape(end_label)}</div>
-            </div>
-            """
+            (
+                f'<div class="tbl-row">'
+                f'<div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>'
+                f'<div class="tbl-cell">{escape(str(r["advertiser"] or "-"))}</div>'
+                f'<div class="tbl-cell"><div>{escape(str(r["campaign_name"]))}</div><div class="subtext">{escape(str(r["campaign_id"]))}</div></div>'
+                f'<div class="tbl-cell num">{fmt_num(float(r["goal_impressions"]))}</div>'
+                f'<div class="tbl-cell num">{fmt_num(float(r["delivered_impressions"]))}</div>'
+                f'<div class="tbl-cell"><div class="pace-wrap"><div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div><div class="pace-marker" style="left:{expected_pct:.1f}%;"></div></div></div>'
+                f'<div class="tbl-cell">{delivery_pct:.1f}%</div>'
+                f'<div class="tbl-cell">{expected_pct:.1f}%</div>'
+                f'<div class="tbl-cell">{escape(flight)}</div>'
+                f'<div class="tbl-cell">{escape(end_label)}</div>'
+                f'</div>'
+            )
         )
 
-    html = f"""
-    <div class="table-shell">
-      <div class="tbl-head">
-        <div class="tbl-cell">Status</div>
-        <div class="tbl-cell">Advertiser</div>
-        <div class="tbl-cell">Order / Line Item</div>
-        <div class="tbl-cell">Goal</div>
-        <div class="tbl-cell">Delivered</div>
-        <div class="tbl-cell">Pacing</div>
-        <div class="tbl-cell">Actual %</div>
-        <div class="tbl-cell">Expected</div>
-        <div class="tbl-cell">Flight</div>
-        <div class="tbl-cell">End Date</div>
-      </div>
-      {''.join(rows)}
-    </div>
-    """
+    html = (
+        '<div class="table-shell">'
+        '<div class="tbl-head">'
+        '<div class="tbl-cell">Status</div>'
+        '<div class="tbl-cell">Advertiser</div>'
+        '<div class="tbl-cell">Order / Line Item</div>'
+        '<div class="tbl-cell">Goal</div>'
+        '<div class="tbl-cell">Delivered</div>'
+        '<div class="tbl-cell">Pacing</div>'
+        '<div class="tbl-cell">Actual %</div>'
+        '<div class="tbl-cell">Expected</div>'
+        '<div class="tbl-cell">Flight</div>'
+        '<div class="tbl-cell">End Date</div>'
+        "</div>"
+        + "".join(rows)
+        + "</div>"
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
