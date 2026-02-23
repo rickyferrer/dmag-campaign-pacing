@@ -3,7 +3,6 @@ from datetime import datetime
 from html import escape
 
 import pandas as pd
-import plotly.express as px
 import psycopg
 import streamlit as st
 from dotenv import load_dotenv
@@ -221,14 +220,6 @@ def fmt_compact_number(n: float) -> str:
     return f"{n:,.0f}"
 
 
-def fmt_money(n: float) -> str:
-    if n >= 1_000_000:
-        return f"${n/1_000_000:.2f}M"
-    if n >= 1_000:
-        return f"${n/1_000:.1f}K"
-    return f"${n:,.0f}"
-
-
 def render_custom_table(view: pd.DataFrame) -> None:
     if view.empty:
         st.info("No campaigns match current filters.")
@@ -347,47 +338,33 @@ def main() -> None:
 
     total_goal = int(df["goal_impressions"].sum())
     total_delivered = int(df["delivered_impressions"].sum())
-    total_revenue = float(df["revenue"].fillna(0).sum()) if "revenue" in df.columns else 0.0
-    ecpm_value = (total_revenue * 1000 / max(total_delivered, 1)) if total_revenue > 0 and total_delivered > 0 else None
     weighted_viewability = None
     if "viewability" in df.columns:
         vv = df[df["viewability"].notna() & df["delivered_impressions"].notna() & (df["delivered_impressions"] > 0)].copy()
         if not vv.empty:
             weighted_viewability = float((vv["viewability"] * vv["delivered_impressions"]).sum() / vv["delivered_impressions"].sum())
     high_count = int((df["risk_level"] == "high").sum())
-    med_count = int((df["risk_level"] == "medium").sum())
     ontrack_count = int((df["risk_level"] == "on_track").sum())
 
-    ov1, ov2, ov3, ov4 = st.columns(4)
+    ov1, ov2 = st.columns(2)
     with ov1:
         st.markdown(
-            f"""<div class="kpi"><div class="label">Impressions</div><div class="value">{fmt_compact_number(float(total_delivered))}</div></div>""",
+            f"""<div class="kpi"><div class="label">Impressions (Last 30 Days)</div><div class="value">{fmt_compact_number(float(total_delivered))}</div></div>""",
             unsafe_allow_html=True,
         )
     with ov2:
         st.markdown(
-            f"""<div class="kpi"><div class="label">Revenue</div><div class="value">{fmt_money(total_revenue)}</div></div>""",
-            unsafe_allow_html=True,
-        )
-    with ov3:
-        st.markdown(
-            f"""<div class="kpi"><div class="label">eCPM</div><div class="value">{f'${ecpm_value:,.2f}' if ecpm_value is not None else 'N/A'}</div></div>""",
-            unsafe_allow_html=True,
-        )
-    with ov4:
-        st.markdown(
-            f"""<div class="kpi"><div class="label">Viewability</div><div class="value">{f'{weighted_viewability:.1f}%' if weighted_viewability is not None else 'N/A'}</div></div>""",
+            f"""<div class="kpi"><div class="label">Viewability (Last 30 Days)</div><div class="value">{f'{weighted_viewability:.1f}%' if weighted_viewability is not None else 'N/A'}</div></div>""",
             unsafe_allow_html=True,
         )
 
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3 = st.columns(3)
     cards = [
         ("High Risk", f"{high_count}", RISK_COLORS["high"]),
-        ("Medium Risk", f"{med_count}", RISK_COLORS["medium"]),
         ("On Track", f"{ontrack_count}", RISK_COLORS["on_track"]),
         ("Delivered / Goal", f"{(total_delivered / max(total_goal, 1)):.1%}", "#030213"),
     ]
-    for col, (label, value, color) in zip((k1, k2, k3, k4), cards):
+    for col, (label, value, color) in zip((k1, k2, k3), cards):
         with col:
             st.markdown(
                 f"""<div class="kpi"><div class="label">{label}</div><div class="value" style="color:{color};">{value}</div></div>""",
