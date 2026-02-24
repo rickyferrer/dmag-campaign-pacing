@@ -89,7 +89,7 @@ def apply_theme() -> None:
         }
         .tbl-head, .tbl-row {
           display: grid;
-          grid-template-columns: 170px 2.3fr 130px 130px 220px 95px 95px 170px 110px;
+          grid-template-columns: 150px 3.2fr 105px 105px 200px 82px 82px 145px 90px;
           column-gap: 0px;
           align-items: center;
         }
@@ -216,19 +216,62 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_latest_overview(database_url: str) -> pd.DataFrame:
-    query = """
-    SELECT
-      snapshot_ts,
-      source_report_id,
-      impressions_30d,
-      viewability_30d,
-      impressions_prev_30d,
-      viewability_prev_30d
-    FROM campaign_overview_snapshot
-    ORDER BY snapshot_ts DESC
-    LIMIT 2;
-    """
     with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM information_schema.tables
+                  WHERE table_schema = 'public' AND table_name = 'campaign_overview_snapshot'
+                );
+                """
+            )
+            table_exists = bool(cur.fetchone()[0])
+            if not table_exists:
+                return pd.DataFrame(
+                    columns=[
+                        "snapshot_ts",
+                        "source_report_id",
+                        "impressions_30d",
+                        "viewability_30d",
+                        "impressions_prev_30d",
+                        "viewability_prev_30d",
+                    ]
+                )
+
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'campaign_overview_snapshot';
+                """
+            )
+            cols = {row[0] for row in cur.fetchall()}
+
+        impressions_prev_col = (
+            "impressions_prev_30d"
+            if "impressions_prev_30d" in cols
+            else "NULL::bigint AS impressions_prev_30d"
+        )
+        viewability_prev_col = (
+            "viewability_prev_30d"
+            if "viewability_prev_30d" in cols
+            else "NULL::double precision AS viewability_prev_30d"
+        )
+
+        query = f"""
+        SELECT
+          snapshot_ts,
+          source_report_id,
+          impressions_30d,
+          viewability_30d,
+          {impressions_prev_col},
+          {viewability_prev_col}
+        FROM campaign_overview_snapshot
+        ORDER BY snapshot_ts DESC
+        LIMIT 2;
+        """
         return pd.read_sql(query, conn)
 
 
