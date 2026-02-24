@@ -288,6 +288,15 @@ def format_delta(curr: float, prev: float, suffix: str = "") -> str:
     return f"{sign}{abs_text}{suffix} ({sign}{abs(pct_delta):.1f}%) vs previous period"
 
 
+def normalize_percent_pair(curr: float, prev: float) -> tuple[float, float]:
+    # Handle historical unit mismatch (fraction vs percent), e.g. 0.56 vs 55.6.
+    if curr > 1.0 and prev <= 1.0:
+        return curr, prev * 100.0
+    if prev > 1.0 and curr <= 1.0:
+        return curr * 100.0, prev
+    return curr, prev
+
+
 def pace_state(row: pd.Series) -> str:
     today = pd.Timestamp.now().date()
     end_date = row["end_date"].date() if pd.notna(row["end_date"]) else None
@@ -499,7 +508,8 @@ def main() -> None:
 
     viewability_delta = None
     if viewability_30d is not None and previous_viewability_30d is not None:
-        viewability_delta = format_delta(float(viewability_30d), float(previous_viewability_30d), suffix="pp")
+        curr_v, prev_v = normalize_percent_pair(float(viewability_30d), float(previous_viewability_30d))
+        viewability_delta = format_delta(curr_v, prev_v, suffix="pp")
 
     cards = [
         (
