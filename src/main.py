@@ -543,6 +543,9 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
 
         if len(values) > view_idx:
             viewability = parse_float(values[view_idx])
+            if viewability is not None and viewability <= 1:
+                # GAM can return viewability as a fraction (0-1). Normalize to percent.
+                viewability *= 100.0
             if viewability is not None and impressions > 0:
                 weighted_viewability_sum += (viewability * impressions)
                 weighted_viewability_denominator += impressions
@@ -552,6 +555,8 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
             total_impressions_prev += impressions_prev
             if view_prev_idx is not None and len(values) > view_prev_idx:
                 viewability_prev = parse_float(values[view_prev_idx])
+                if viewability_prev is not None and viewability_prev <= 1:
+                    viewability_prev *= 100.0
                 if viewability_prev is not None and impressions_prev > 0:
                     weighted_viewability_prev_sum += (viewability_prev * impressions_prev)
                     weighted_viewability_prev_denominator += impressions_prev
