@@ -461,7 +461,10 @@ def fetch_gam_report_rows(network_code: str, report_id: str) -> List[List[str]]:
         dimension_values = [_extract_report_value(v) for v in row.dimension_values]
         metric_values = []
         if row.metric_value_groups:
-            metric_values = [_extract_report_value(v) for v in row.metric_value_groups[0].primary_values]
+            # Flatten all metric groups so reports with multiple selected metrics
+            # (e.g. impressions + viewability) are fully captured.
+            for group in row.metric_value_groups:
+                metric_values.extend([_extract_report_value(v) for v in group.primary_values])
         rows.append(dimension_values + metric_values)
     return rows
 
