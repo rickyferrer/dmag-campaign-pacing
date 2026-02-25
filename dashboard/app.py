@@ -116,6 +116,8 @@ def apply_theme() -> None:
         }
         .th-link:hover { text-decoration:underline; }
         .subtext { color:#6b7280; font-size:12px; margin-top: 2px; }
+        .line-item-link { color:#1d4ed8; text-decoration:none; font-weight:600; }
+        .line-item-link:hover { text-decoration:underline; }
         .chip {
           display:inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent;
         }
@@ -370,7 +372,7 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
 
     today = pd.Timestamp.now().date()
     rows = []
-    network_code = os.getenv("GAM_NETWORK_CODE", "").strip()
+    network_code = os.getenv("GAM_NETWORK_CODE", "").strip() or "1039436"
     for _, r in view.iterrows():
         state = pace_state(r)
         campaign_id = str(r["campaign_id"])
@@ -395,7 +397,7 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
                 f"#delivery/line_item/detail/line_item_id={escape(campaign_id)}"
             )
             line_item_name_html = (
-                f'<a href="{line_item_url}" target="_blank" rel="noopener noreferrer">'
+                f'<a class="line-item-link" href="{line_item_url}" target="_blank" rel="noopener noreferrer">'
                 f'{escape(str(r["campaign_name"]))}</a>'
             )
         else:
