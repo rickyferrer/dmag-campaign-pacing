@@ -742,6 +742,16 @@ def write_overview_snapshot_to_db(report_id: str, overview: OverviewMetrics) -> 
         conn.commit()
 
 
+def has_valid_overview_values(overview: Optional[OverviewMetrics]) -> bool:
+    if overview is None:
+        return False
+    if overview.impressions_30d and overview.impressions_30d > 0:
+        return True
+    if overview.viewability_30d is not None:
+        return True
+    return False
+
+
 def format_alert_body(metrics: List[CampaignMetrics]) -> str:
     active_statuses = {"live", "ready", "no assets", "paused", "active"}
     today = date.today()
@@ -856,7 +866,13 @@ def main() -> None:
 
     write_snapshot_to_db(metrics)
     if overview_metrics is not None and overview_report_id:
-        write_overview_snapshot_to_db(overview_report_id, overview_metrics)
+        if has_valid_overview_values(overview_metrics):
+            write_overview_snapshot_to_db(overview_report_id, overview_metrics)
+        else:
+            print(
+                "\nOverview snapshot skipped because parsed overview values were empty "
+                "(impressions=0 and viewability=N/A)."
+            )
     if args.skip_email:
         print("\nSnapshot written to DB. Email skipped.")
         return

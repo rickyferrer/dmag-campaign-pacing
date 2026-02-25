@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 from html import escape
+from typing import Optional
 
 import pandas as pd
 import psycopg
@@ -89,7 +90,7 @@ def apply_theme() -> None:
         }
         .tbl-head, .tbl-row {
           display: grid;
-          grid-template-columns: 150px 3.2fr 105px 105px 200px 82px 82px 145px 90px;
+          grid-template-columns: 122px 3.2fr 105px 105px 200px 100px 100px 145px 90px;
           column-gap: 0px;
           align-items: center;
         }
@@ -111,6 +112,7 @@ def apply_theme() -> None:
         }
         .th-link {
           color:#111827; text-decoration:none; font-weight:700;
+          white-space: nowrap;
         }
         .th-link:hover { text-decoration:underline; }
         .subtext { color:#6b7280; font-size:12px; margin-top: 2px; }
@@ -273,6 +275,17 @@ def load_latest_overview(database_url: str) -> pd.DataFrame:
         LIMIT 2;
         """
         return pd.read_sql(query, conn)
+
+
+def pick_latest_valid_overview_row(overview_df: pd.DataFrame) -> Optional[pd.Series]:
+    if overview_df.empty:
+        return None
+    for _, row in overview_df.iterrows():
+        has_impressions = pd.notna(row["impressions_30d"]) and float(row["impressions_30d"]) > 0
+        has_viewability = pd.notna(row["viewability_30d"])
+        if has_impressions or has_viewability:
+            return row
+    return None
 
 
 def format_delta(curr: float, prev: float, suffix: str = "") -> str:
@@ -485,20 +498,14 @@ def main() -> None:
     viewability_30d = None
     previous_impressions_30d = None
     previous_viewability_30d = None
-    if not overview_df.empty:
-        latest_row = overview_df.iloc[0]
+    latest_row = pick_latest_valid_overview_row(overview_df)
+    if latest_row is not None:
         impressions_30d = int(latest_row["impressions_30d"]) if pd.notna(latest_row["impressions_30d"]) else impressions_30d
         viewability_30d = float(latest_row["viewability_30d"]) if pd.notna(latest_row["viewability_30d"]) else None
         if "impressions_prev_30d" in latest_row and pd.notna(latest_row["impressions_prev_30d"]):
             previous_impressions_30d = int(latest_row["impressions_prev_30d"])
         if "viewability_prev_30d" in latest_row and pd.notna(latest_row["viewability_prev_30d"]):
             previous_viewability_30d = float(latest_row["viewability_prev_30d"])
-        if len(overview_df) > 1:
-            prev_row = overview_df.iloc[1]
-            if previous_impressions_30d is None and pd.notna(prev_row["impressions_30d"]):
-                previous_impressions_30d = int(prev_row["impressions_30d"])
-            if previous_viewability_30d is None and pd.notna(prev_row["viewability_30d"]):
-                previous_viewability_30d = float(prev_row["viewability_30d"])
     high_count = int((df["risk_level"] == "high").sum())
     ontrack_count = int((df["risk_level"] == "on_track").sum())
 
@@ -516,13 +523,13 @@ def main() -> None:
             "Impressions (Last 30 Days)",
             f"{fmt_compact_number(float(impressions_30d))}",
             "#030213",
-            impressions_delta or "n/a vs previous period",
+            impressions_delta or "n/a (previous-period compare not provided by report)",
         ),
         (
             "Viewability (Last 30 Days)",
             f"{f'{viewability_30d:.1f}%' if viewability_30d is not None else 'N/A'}",
             "#030213",
-            viewability_delta or "n/a vs previous period",
+            viewability_delta or "n/a (previous-period compare not provided by report)",
         ),
         ("High Risk", f"{high_count}", RISK_COLORS["high"], ""),
         ("On Track", f"{ontrack_count}", RISK_COLORS["on_track"], ""),
