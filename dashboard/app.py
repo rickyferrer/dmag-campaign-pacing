@@ -370,8 +370,10 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
 
     today = pd.Timestamp.now().date()
     rows = []
+    network_code = os.getenv("GAM_NETWORK_CODE", "").strip()
     for _, r in view.iterrows():
         state = pace_state(r)
+        campaign_id = str(r["campaign_id"])
         delivery_pct = max(min(float(r["delivery_pct_of_goal"]), 100.0), 0.0)
         expected_pct = max(min((float(r["expected_to_date"]) / max(float(r["goal_impressions"]), 1)) * 100.0, 100.0), 0.0)
         bar_color = PACE_COLORS.get(state, "#94a3b8")
@@ -387,11 +389,23 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
             end_label = "Ended"
             end_class = ' style="color:#6b7280;"'
         flight = f"{start_date.strftime('%b %-d') if start_date else '-'} – {end_date.strftime('%b %-d') if end_date else '-'}"
+        if network_code and campaign_id:
+            line_item_url = (
+                f"https://admanager.google.com/{escape(network_code)}"
+                f"#delivery/line_item/detail/line_item_id={escape(campaign_id)}"
+            )
+            line_item_name_html = (
+                f'<a href="{line_item_url}" target="_blank" rel="noopener noreferrer">'
+                f'{escape(str(r["campaign_name"]))}</a>'
+            )
+        else:
+            line_item_name_html = escape(str(r["campaign_name"]))
+
         rows.append(
             (
                 f'<div class="tbl-row">'
                 f'<div class="tbl-cell"><span class="chip {chip_class(state)}">{escape(state)}</span></div>'
-                f'<div class="tbl-cell"><div>{escape(str(r["campaign_name"]))}</div><div class="subtext">{escape(str(r["campaign_id"]))}</div></div>'
+                f'<div class="tbl-cell"><div>{line_item_name_html}</div><div class="subtext">{escape(campaign_id)}</div></div>'
                 f'<div class="tbl-cell num">{fmt_num(float(r["goal_impressions"]))}</div>'
                 f'<div class="tbl-cell num">{fmt_num(float(r["delivered_impressions"]))}</div>'
                 f'<div class="tbl-cell"><div class="pace-wrap"><div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div><div class="pace-marker" style="left:{expected_pct:.1f}%;"></div></div></div>'
@@ -557,13 +571,23 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    c1, c2, c4, c6 = st.columns([2.8, 1.8, 1.6, 1.0])
+    c1, c2, c4, c6, c7 = st.columns([2.8, 1.8, 1.6, 1.0, 1.6])
     search = c1.text_input(
         "Search orders or line items",
         placeholder="Search orders or line items...",
         label_visibility="collapsed",
     )
-    advertisers = sorted([a for a in df["advertiser"].dropna().unique() if a])
+    today = pd.Timestamp.now().date()
+    running_mask = (
+        (df["end_date"].dt.date >= today)
+        & (
+            df["status"].isna()
+            | (df["status"].astype(str).str.strip() == "")
+            | (df["status"].astype(str).str.lower() == "active")
+        )
+    )
+    running_advertisers_df = df[running_mask]
+    advertisers = sorted([a for a in running_advertisers_df["advertiser"].dropna().unique() if a])
     adv_choice = c2.selectbox(
         "All Advertisers",
         ["All Advertisers"] + advertisers,
@@ -577,6 +601,7 @@ def main() -> None:
         label_visibility="collapsed",
     )
     hide_completed = c6.checkbox("Hide completed", value=True)
+    hide_sponsored_branded = c7.checkbox("Hide sponsored/branded", value=False)
 
     view = df.copy()
     if search:
@@ -592,6 +617,21 @@ def main() -> None:
         view = view[view["pace_state"] == status_choice]
     if hide_completed:
         view = view[view["pace_state"] != "Completed"]
+    if hide_sponsored_branded:
+        text = (
+            view["campaign_name"].fillna("").astype(str).str.lower()
+            + " "
+            + view["advertiser"].fillna("").astype(str).str.lower()
+        )
+        sponsored_branded_terms = [
+            "sponsored content",
+            "sponsored post",
+            "spon con",
+            "branded content",
+            "branding",
+        ]
+        mask = text.str.contains("|".join(sponsored_branded_terms), na=False, regex=True)
+        view = view[~mask]
 
     qp = st.query_params
     requested_sort = str(qp.get("sort", "end_date"))
