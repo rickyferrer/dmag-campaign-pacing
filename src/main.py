@@ -537,6 +537,35 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
             return raw * 100.0
         return raw
 
+    def _infer_date_idx(values_rows: List[List[str]], candidate_count: int = 8) -> Optional[int]:
+        max_len = max((len(r) for r in values_rows), default=0)
+        if max_len == 0:
+            return None
+        scan_upto = min(max_len, candidate_count)
+        for idx in range(scan_upto):
+            total = 0
+            parsed = 0
+            for vals in values_rows[:200]:
+                if len(vals) <= idx:
+                    continue
+                cell = (vals[idx] or "").strip()
+                if not cell:
+                    continue
+                total += 1
+                try:
+                    parse_date(cell)
+                    parsed += 1
+                except ValueError:
+                    pass
+            if total > 0 and parsed / total >= 0.8:
+                return idx
+        return None
+
+    if date_idx is None:
+        inferred = _infer_date_idx(rows)
+        if inferred is not None:
+            date_idx = inferred
+
     # Preferred mode: date rows present (rolling current-30 vs previous-30).
     dated_rows: List[tuple[date, int, Optional[float]]] = []
     if date_idx is not None:
@@ -832,8 +861,11 @@ def main() -> None:
         overview_prev_report_id = os.getenv("GAM_OVERVIEW_PREV_REPORT_ID", "").strip()
         overview_metrics = None
         if overview_report_id:
-            overview_metrics = load_gam_overview_current_only(overview_report_id)
-            if overview_prev_report_id:
+            # Default: compute current/previous 30-day windows directly from one
+            # date-split overview report.
+            overview_metrics = load_gam_overview_metrics(overview_report_id)
+            # Optional explicit override: provide a separate previous-period report.
+            if overview_prev_report_id and overview_prev_report_id != overview_report_id:
                 prev_overview = load_gam_overview_current_only(overview_prev_report_id)
                 overview_metrics.impressions_prev_30d = prev_overview.impressions_30d
                 overview_metrics.viewability_prev_30d = prev_overview.viewability_30d
