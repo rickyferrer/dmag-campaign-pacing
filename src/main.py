@@ -612,6 +612,15 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
             viewability_prev_30d=(prev_view_num / prev_view_den) if prev_view_den > 0 else None,
         )
 
+    # If caller configured a date-based overview map, fail fast instead of
+    # silently treating totals-only output as "Last 30 Days".
+    if date_idx is not None:
+        raise RuntimeError(
+            "GAM overview report did not return date-split rows. "
+            "Set Split=Date in report "
+            f"{report_id} and ensure GAM_OVERVIEW_FIELD_MAP points to date/impressions/viewability columns."
+        )
+
     # Fallback mode: totals row with optional previous-period columns.
     total_impressions = 0
     weighted_viewability_sum = 0.0
@@ -864,20 +873,13 @@ def main() -> None:
             # Default: compute current/previous 30-day windows directly from one
             # date-split overview report.
             overview_metrics = load_gam_overview_metrics(overview_report_id)
-            # Optional explicit override: only if previous-period values were not
-            # already derived from the current date-split report.
-            has_derived_previous = (
-                overview_metrics.impressions_prev_30d is not None
-                or overview_metrics.viewability_prev_30d is not None
-            )
-            if (
-                overview_prev_report_id
-                and overview_prev_report_id != overview_report_id
-                and not has_derived_previous
-            ):
-                prev_overview = load_gam_overview_current_only(overview_prev_report_id)
-                overview_metrics.impressions_prev_30d = prev_overview.impressions_30d
-                overview_metrics.viewability_prev_30d = prev_overview.viewability_30d
+            # Keep one-source-of-truth behavior: derive current/previous 30 from
+            # the same date-split 60-day report.
+            if overview_prev_report_id:
+                print(
+                    "Ignoring GAM_OVERVIEW_PREV_REPORT_ID because previous-period values "
+                    "are derived from GAM_OVERVIEW_REPORT_ID date rows."
+                )
 
     risk_counts = {}
     for m in metrics:
