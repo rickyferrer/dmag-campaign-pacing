@@ -4,7 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from email.mime.text import MIMEText
 import smtplib
 from typing import Dict, List, Optional
@@ -148,14 +148,14 @@ def load_gam_field_map() -> Dict[str, int]:
 
 def load_gam_overview_field_map() -> Dict[str, int]:
     default_map = {
-        # Supports "totals + compare previous period" report layout.
-        # Example:
-        # 0=current impressions, 1=previous impressions, 2=impressions change,
-        # 3=current viewability, 4=previous viewability, 5=viewability change.
-        "impressions": 0,
-        "impressions_prev": 1,
-        "viewability": 3,
-        "viewability_prev": 4,
+        # Preferred layout: Last 60 days with Date dimension.
+        # 0=date, 1=impressions, 2=viewability
+        "date": 0,
+        "impressions": 1,
+        "viewability": 2,
+        # Optional layout (totals+compare):
+        # "impressions_prev": 1,
+        # "viewability_prev": 4,
     }
     custom = os.getenv("GAM_OVERVIEW_FIELD_MAP", "").strip()
     if not custom:
@@ -524,6 +524,66 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
     if not rows:
         return OverviewMetrics(impressions_30d=0, viewability_30d=None)
 
+    date_idx = field_map.get("date")
+    imp_idx = field_map.get("impressions", 0)
+    view_idx = field_map.get("viewability", 1)
+    imp_prev_idx = field_map.get("impressions_prev")
+    view_prev_idx = field_map.get("viewability_prev")
+
+    def _normalize_viewability(raw: Optional[float]) -> Optional[float]:
+        if raw is None:
+            return None
+        if raw <= 1:
+            return raw * 100.0
+        return raw
+
+    # Preferred mode: date rows present (rolling current-30 vs previous-30).
+    dated_rows: List[tuple[date, int, Optional[float]]] = []
+    if date_idx is not None:
+        for values in rows:
+            if len(values) <= max(date_idx, imp_idx):
+                continue
+            try:
+                d = parse_date(values[date_idx])
+            except ValueError:
+                continue
+            imps = parse_int(values[imp_idx])
+            view = _normalize_viewability(parse_float(values[view_idx])) if len(values) > view_idx else None
+            dated_rows.append((d, imps, view))
+
+    if dated_rows:
+        max_day = max(d for d, _, _ in dated_rows)
+        current_start = max_day - timedelta(days=29)
+        previous_start = max_day - timedelta(days=59)
+        previous_end = max_day - timedelta(days=30)
+
+        curr_imps = 0
+        curr_view_num = 0.0
+        curr_view_den = 0
+        prev_imps = 0
+        prev_view_num = 0.0
+        prev_view_den = 0
+
+        for d, imps, view in dated_rows:
+            if current_start <= d <= max_day:
+                curr_imps += imps
+                if view is not None and imps > 0:
+                    curr_view_num += (view * imps)
+                    curr_view_den += imps
+            elif previous_start <= d <= previous_end:
+                prev_imps += imps
+                if view is not None and imps > 0:
+                    prev_view_num += (view * imps)
+                    prev_view_den += imps
+
+        return OverviewMetrics(
+            impressions_30d=curr_imps,
+            viewability_30d=(curr_view_num / curr_view_den) if curr_view_den > 0 else None,
+            impressions_prev_30d=prev_imps if prev_imps > 0 else None,
+            viewability_prev_30d=(prev_view_num / prev_view_den) if prev_view_den > 0 else None,
+        )
+
+    # Fallback mode: totals row with optional previous-period columns.
     total_impressions = 0
     weighted_viewability_sum = 0.0
     weighted_viewability_denominator = 0
@@ -532,11 +592,6 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
     weighted_viewability_prev_denominator = 0
 
     for values in rows:
-        imp_idx = field_map.get("impressions", 0)
-        view_idx = field_map.get("viewability", 1)
-        imp_prev_idx = field_map.get("impressions_prev")
-        view_prev_idx = field_map.get("viewability_prev")
-
         if len(values) <= imp_idx:
             continue
 
@@ -544,10 +599,7 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
         total_impressions += impressions
 
         if len(values) > view_idx:
-            viewability = parse_float(values[view_idx])
-            if viewability is not None and viewability <= 1:
-                # GAM can return viewability as a fraction (0-1). Normalize to percent.
-                viewability *= 100.0
+            viewability = _normalize_viewability(parse_float(values[view_idx]))
             if viewability is not None and impressions > 0:
                 weighted_viewability_sum += (viewability * impressions)
                 weighted_viewability_denominator += impressions
@@ -556,9 +608,7 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
             impressions_prev = parse_int(values[imp_prev_idx])
             total_impressions_prev += impressions_prev
             if view_prev_idx is not None and len(values) > view_prev_idx:
-                viewability_prev = parse_float(values[view_prev_idx])
-                if viewability_prev is not None and viewability_prev <= 1:
-                    viewability_prev *= 100.0
+                viewability_prev = _normalize_viewability(parse_float(values[view_prev_idx]))
                 if viewability_prev is not None and impressions_prev > 0:
                     weighted_viewability_prev_sum += (viewability_prev * impressions_prev)
                     weighted_viewability_prev_denominator += impressions_prev
@@ -576,6 +626,16 @@ def load_gam_overview_metrics(report_id: str) -> OverviewMetrics:
         viewability_30d=weighted_viewability,
         impressions_prev_30d=total_impressions_prev if total_impressions_prev > 0 else None,
         viewability_prev_30d=weighted_viewability_prev,
+    )
+
+
+def load_gam_overview_current_only(report_id: str) -> OverviewMetrics:
+    overview = load_gam_overview_metrics(report_id)
+    return OverviewMetrics(
+        impressions_30d=overview.impressions_30d,
+        viewability_30d=overview.viewability_30d,
+        impressions_prev_30d=None,
+        viewability_prev_30d=None,
     )
 
 
@@ -759,9 +819,14 @@ def main() -> None:
     else:
         metrics = load_gam_metrics(args.gam_report_id, columns)
         overview_report_id = (args.gam_overview_report_id or os.getenv("GAM_OVERVIEW_REPORT_ID", "")).strip()
+        overview_prev_report_id = os.getenv("GAM_OVERVIEW_PREV_REPORT_ID", "").strip()
         overview_metrics = None
         if overview_report_id:
-            overview_metrics = load_gam_overview_metrics(overview_report_id)
+            overview_metrics = load_gam_overview_current_only(overview_report_id)
+            if overview_prev_report_id:
+                prev_overview = load_gam_overview_current_only(overview_prev_report_id)
+                overview_metrics.impressions_prev_30d = prev_overview.impressions_30d
+                overview_metrics.viewability_prev_30d = prev_overview.viewability_30d
 
     risk_counts = {}
     for m in metrics:
