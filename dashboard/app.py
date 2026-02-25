@@ -90,7 +90,7 @@ def apply_theme() -> None:
         }
         .tbl-head, .tbl-row {
           display: grid;
-          grid-template-columns: 122px 3.2fr 105px 105px 200px 100px 100px 145px 90px;
+          grid-template-columns: 110px 3.0fr 100px 105px 80px 90px 200px 90px 90px 140px 85px;
           column-gap: 0px;
           align-items: center;
         }
@@ -178,6 +178,8 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
     revenue_col = "revenue" if "revenue" in existing_cols else "NULL::double precision AS revenue"
     ecpm_col = "ecpm" if "ecpm" in existing_cols else "NULL::double precision AS ecpm"
     viewability_col = "viewability" if "viewability" in existing_cols else "NULL::double precision AS viewability"
+    clicks_col = "clicks" if "clicks" in existing_cols else "NULL::bigint AS clicks"
+    ctr_col = "ctr" if "ctr" in existing_cols else "NULL::double precision AS ctr"
 
     query = f"""
     WITH latest AS (
@@ -199,7 +201,9 @@ def load_latest_campaigns(database_url: str) -> pd.DataFrame:
         risk_reason,
         {revenue_col},
         {ecpm_col},
-        {viewability_col}
+        {viewability_col},
+        {clicks_col},
+        {ctr_col}
       FROM campaign_pacing_snapshot
       ORDER BY campaign_id, snapshot_ts DESC
     )
@@ -378,6 +382,8 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
         campaign_id = str(r["campaign_id"])
         delivery_pct = max(min(float(r["delivery_pct_of_goal"]), 100.0), 0.0)
         expected_pct = max(min((float(r["expected_to_date"]) / max(float(r["goal_impressions"]), 1)) * 100.0, 100.0), 0.0)
+        clicks = int(r["clicks"]) if pd.notna(r.get("clicks")) else 0
+        ctr_pct = (clicks / max(float(r["delivered_impressions"]), 1)) * 100.0
         bar_color = PACE_COLORS.get(state, "#94a3b8")
         end_date = r["end_date"].date() if pd.notna(r["end_date"]) else None
         start_date = r["start_date"].date() if pd.notna(r["start_date"]) else None
@@ -410,6 +416,8 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
                 f'<div class="tbl-cell"><div>{line_item_name_html}</div><div class="subtext">{escape(campaign_id)}</div></div>'
                 f'<div class="tbl-cell num">{fmt_num(float(r["goal_impressions"]))}</div>'
                 f'<div class="tbl-cell num">{fmt_num(float(r["delivered_impressions"]))}</div>'
+                f'<div class="tbl-cell num">{clicks:,}</div>'
+                f'<div class="tbl-cell">{ctr_pct:.2f}%</div>'
                 f'<div class="tbl-cell"><div class="pace-wrap"><div class="pace-fill" style="width:{delivery_pct:.1f}%; background:{bar_color};"></div><div class="pace-marker" style="left:{expected_pct:.1f}%;"></div></div></div>'
                 f'<div class="tbl-cell">{delivery_pct:.1f}%</div>'
                 f'<div class="tbl-cell">{expected_pct:.1f}%</div>'
@@ -426,6 +434,8 @@ def render_custom_table(view: pd.DataFrame, sort_key: str, sort_dir: str) -> Non
         f'<div class="tbl-cell">{header_link("Order / Line Item", "campaign_name", sort_key, sort_dir)}</div>'
         f'<div class="tbl-cell">{header_link("Goal", "goal", sort_key, sort_dir)}</div>'
         f'<div class="tbl-cell">{header_link("Delivered", "delivered", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("Clicks", "clicks", sort_key, sort_dir)}</div>'
+        f'<div class="tbl-cell">{header_link("CTR", "ctr", sort_key, sort_dir)}</div>'
         f'<div class="tbl-cell">{header_link("Pacing", "actual_pct", sort_key, sort_dir)}</div>'
         f'<div class="tbl-cell">{header_link("Actual %", "actual_pct", sort_key, sort_dir)}</div>'
         f'<div class="tbl-cell">{header_link("Expected", "expected_pct", sort_key, sort_dir)}</div>'
@@ -465,6 +475,11 @@ def main() -> None:
     df["projected_pct_of_goal"] = (df["projected_final"] / df["goal_impressions"]) * 100
     df["delivery_pct_of_goal"] = (df["delivered_impressions"] / df["goal_impressions"]) * 100
     df["gap_to_goal"] = (df["goal_impressions"] - df["projected_final"]).clip(lower=0)
+    if "clicks" not in df.columns:
+        df["clicks"] = 0
+    df["clicks"] = pd.to_numeric(df["clicks"], errors="coerce").fillna(0).astype(int)
+    df["ctr_pct"] = (df["clicks"] / df["delivered_impressions"].replace(0, pd.NA).astype(float)) * 100
+    df["ctr_pct"] = df["ctr_pct"].fillna(0.0)
     df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"], errors="coerce")
     df["start_date"] = pd.to_datetime(df["start_date"], errors="coerce")
     df["end_date"] = pd.to_datetime(df["end_date"], errors="coerce")
@@ -646,6 +661,8 @@ def main() -> None:
         "campaign_name": "campaign_name",
         "goal": "goal_impressions",
         "delivered": "delivered_impressions",
+        "clicks": "clicks",
+        "ctr": "ctr_pct",
         "actual_pct": "delivery_pct_of_goal",
         "expected_pct": "expected_to_date",
         "start_date": "start_date",

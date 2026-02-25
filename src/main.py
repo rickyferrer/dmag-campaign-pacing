@@ -49,6 +49,8 @@ class CampaignMetrics:
     revenue: Optional[float]
     ecpm: Optional[float]
     viewability: Optional[float]
+    clicks: Optional[int]
+    ctr: Optional[float]
 
 
 @dataclass
@@ -136,6 +138,8 @@ def load_gam_field_map() -> Dict[str, int]:
         # "revenue": 10,
         # "ecpm": 11,
         # "viewability": 12,
+        # "clicks": 13,
+        # "ctr": 14,
     }
     custom = os.getenv("GAM_FIELD_MAP", "").strip()
     if not custom:
@@ -259,6 +263,8 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
         row,
         ["viewability", "Viewability", "Active View viewable rate", "Active View: Viewable rate"],
     )
+    clicks_col = best_available_column(row, ["clicks", "Clicks", "Total clicks", "Ad server clicks"])
+    ctr_col = best_available_column(row, ["ctr", "CTR", "Total CTR", "Ad server CTR"])
     campaign_name_col = best_available_column(
         row,
         [columns["campaign_name"], "Campaign", "Line Item", "Line item", "Advertiser", "Order"],
@@ -278,6 +284,8 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
     revenue = parse_float(row.get(revenue_col, "")) if revenue_col else None
     ecpm = parse_float(row.get(ecpm_col, "")) if ecpm_col else None
     viewability = parse_float(row.get(viewability_col, "")) if viewability_col else None
+    clicks = parse_int(row.get(clicks_col, "")) if clicks_col else None
+    ctr = parse_float(row.get(ctr_col, "")) if ctr_col else None
     derived_id = f"{advertiser}|{campaign_name}|{start_date.isoformat()}|{end_date.isoformat()}|{goal}"
     campaign_id = str(row.get(campaign_id_col, "")).strip() if campaign_id_col else derived_id
     if not campaign_id:
@@ -311,6 +319,8 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
             revenue=revenue,
             ecpm=ecpm,
             viewability=viewability,
+            clicks=clicks,
+            ctr=ctr,
         )
     total_days = max((end_date - start_date).days + 1, 1)
     days_elapsed_raw = (today - start_date).days + 1
@@ -358,6 +368,8 @@ def compute_metrics(row: Dict[str, str], columns: Dict[str, str], today: date) -
         revenue=revenue,
         ecpm=ecpm,
         viewability=viewability,
+        clicks=clicks,
+        ctr=ctr,
     )
 
 
@@ -504,6 +516,10 @@ def load_gam_metrics(report_id: str, columns: Dict[str, str]) -> List[CampaignMe
                 row["ecpm"] = values[field_map["ecpm"]] if len(values) > field_map["ecpm"] else ""
             if "viewability" in field_map:
                 row["viewability"] = values[field_map["viewability"]] if len(values) > field_map["viewability"] else ""
+            if "clicks" in field_map:
+                row["clicks"] = values[field_map["clicks"]] if len(values) > field_map["clicks"] else ""
+            if "ctr" in field_map:
+                row["ctr"] = values[field_map["ctr"]] if len(values) > field_map["ctr"] else ""
             output.append(compute_metrics(row, columns, today))
         except (ValueError, KeyError, IndexError):
             skipped += 1
@@ -709,6 +725,8 @@ def write_snapshot_to_db(metrics: List[CampaignMetrics]) -> None:
             m.revenue,
             m.ecpm,
             m.viewability,
+            m.clicks,
+            m.ctr,
         )
         for m in metrics
     ]
@@ -737,9 +755,11 @@ def write_snapshot_to_db(metrics: List[CampaignMetrics]) -> None:
                     risk_reason,
                     revenue,
                     ecpm,
-                    viewability
+                    viewability,
+                    clicks,
+                    ctr
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 );
                 """,
                 rows,

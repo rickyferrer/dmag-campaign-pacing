@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS campaign_pacing_snapshot (
     risk_reason TEXT NOT NULL,
     revenue DOUBLE PRECISION,
     ecpm DOUBLE PRECISION,
-    viewability DOUBLE PRECISION
+    viewability DOUBLE PRECISION,
+    clicks BIGINT,
+    ctr DOUBLE PRECISION
 );
 
 ALTER TABLE campaign_pacing_snapshot
@@ -31,6 +33,12 @@ ADD COLUMN IF NOT EXISTS ecpm DOUBLE PRECISION;
 
 ALTER TABLE campaign_pacing_snapshot
 ADD COLUMN IF NOT EXISTS viewability DOUBLE PRECISION;
+
+ALTER TABLE campaign_pacing_snapshot
+ADD COLUMN IF NOT EXISTS clicks BIGINT;
+
+ALTER TABLE campaign_pacing_snapshot
+ADD COLUMN IF NOT EXISTS ctr DOUBLE PRECISION;
 
 CREATE INDEX IF NOT EXISTS idx_campaign_pacing_snapshot_ts
 ON campaign_pacing_snapshot (snapshot_ts DESC);
