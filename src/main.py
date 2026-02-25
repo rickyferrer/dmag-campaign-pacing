@@ -864,8 +864,17 @@ def main() -> None:
             # Default: compute current/previous 30-day windows directly from one
             # date-split overview report.
             overview_metrics = load_gam_overview_metrics(overview_report_id)
-            # Optional explicit override: provide a separate previous-period report.
-            if overview_prev_report_id and overview_prev_report_id != overview_report_id:
+            # Optional explicit override: only if previous-period values were not
+            # already derived from the current date-split report.
+            has_derived_previous = (
+                overview_metrics.impressions_prev_30d is not None
+                or overview_metrics.viewability_prev_30d is not None
+            )
+            if (
+                overview_prev_report_id
+                and overview_prev_report_id != overview_report_id
+                and not has_derived_previous
+            ):
                 prev_overview = load_gam_overview_current_only(overview_prev_report_id)
                 overview_metrics.impressions_prev_30d = prev_overview.impressions_30d
                 overview_metrics.viewability_prev_30d = prev_overview.viewability_30d
