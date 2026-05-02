@@ -67,3 +67,28 @@ ADD COLUMN IF NOT EXISTS viewability_prev_30d DOUBLE PRECISION;
 
 CREATE INDEX IF NOT EXISTS idx_campaign_overview_snapshot_ts
 ON campaign_overview_snapshot (snapshot_ts DESC);
+
+-- ── Content classification ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS classified_posts (
+    post_id          BIGINT PRIMARY KEY,
+    date             TIMESTAMPTZ NOT NULL,
+    slug             TEXT NOT NULL,
+    title            TEXT NOT NULL,
+    excerpt          TEXT,
+    link             TEXT,
+    post_type        TEXT,
+    categories       TEXT,
+    tags             TEXT,
+    section          TEXT,
+    user_need        TEXT NOT NULL,
+    confidence       TEXT,
+    un_reason        TEXT,
+    classified_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_classified_posts_date
+ON classified_posts (date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_classified_posts_user_need
+ON classified_posts (user_need, date DESC);
